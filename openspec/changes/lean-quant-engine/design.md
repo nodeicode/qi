@@ -61,8 +61,13 @@ abstract for a lean SDK). Rejected.
 
 ### D3. Typed instruments
 A minimal `Instrument` model (symbol, venue, asset class, contract specs,
-tick/lot/settlement metadata) at `quant.instruments`, with typed subclasses
-(`EquityInstrument`, `OptionInstrument` reserved for later). Strategy/protocol
+tick/lot/settlement metadata) at `quant.instruments`, seeded as a typed
+hierarchy (D14): an `instrument_class` discriminator plus an `underlying`
+reference to another instrument, so equity, futures, options, and
+options-on-futures are representable by construction (an option's `underlying`
+points at a future). `EquityInstrument` ships in v1; `OptionInstrument` /
+`FutureInstrument` are defined as thin, registrable types so signatures compose,
+with their accounting/execution semantics deferred (see D14). Strategy/protocol
 surfaces take/return typed instruments where they today take strings, keeping
 `str` ticker conveniences as sugar. Rationale: nautilus's typed instruments are
 the backbone of correct execution and portfolio accounting; a minimal version
@@ -157,6 +162,72 @@ monolith. Baseline now, deepen continuously.
 Work on `sdk-cut` (private), green commit-by-commit; export = curated squashed
 history into the new public repo; private superset untouched until export
 verifies. Rollback = discard branch/public repo, keep trading on private.
+**Superseded (history):** the export already happened (task group 10). The public
+repo is **`nodeicode/qi` on `main`**; `sdk-cut` no longer exists. Remaining work
+in this change proceeds directly on `main` of the public repo.
+
+### D11. Counted primitive set (index, not rank)
+Qi exposes a small, **closed, counted set** of primitives: venue, portfolio,
+position, instrument, observability, config, data, engine. The ingredients are
+individually industry-recognized (nautilus and every serious framework share
+these nouns), but the closed, enumerated set is Qi's editorial reduction — no
+framework prints a numbered primitive list. Membership is **derived by test**, not
+vibes:
+- **Parity-test:** if backtest and live disagree here, results lie → engine
+decisions, position, portfolio, instrument, venue identity, adjusted-bar / interval
+semantics.
+- **Universality-test:** every strategy touches this regardless of venue/asset →
+data, execution, config, observability.
+- **Neither** → deliberately excluded (message bus, cache, clock, risk engine as
+lean Non-Goals), an implementation detail behind a primitive (MemBars/prefetch
+behind *data*), or alpha-specific (the strategy itself — never a primitive).
+Numbering is for **counting / indexing** (a stable vocabulary for users and agents),
+NOT ranking — it must not imply equal replaceability (D13 assigns replaceability).
+
+### D12. Reference conveniences as concept docs, not primitives/code
+Anything that is an amalgamation of existing primitives (a dynamic universe with
+listing/delisting, a rotation, a hedge shape) is **not** a new primitive and is
+generally shipped as a documented construct in `docs/concepts/`, in two flavors:
+- **recipe** — prose + worked example, assembled on demand;
+- **contract** — prose + a runnable parity/invariant check, used when the
+composition is parity-sensitive (e.g. a universe must be point-in-time identical
+across backtest and live — survivorship). A doc asserting parity is a claim; a
+contract makes it verifiable for the user's actual implementation.
+This keeps the counted set at 8 while letting the ecosystem grow through
+composition. **Universe is the proof**: it fails the universality test, so it stays
+a composition behind the data port, not a 9th primitive.
+
+### D13. Usage surfaces decide the tiers (conformance per port)
+Tiers are a projection of how Qi is used, not an independent choice. Three surfaces:
+- **Agent / declarative (A):** assemble a run from the counted set by name
+(config / registry / CLI; human or agent). No new code.
+- **Author (B):** implement a strategy protocol and / or plug custom venue, data,
+executor. The primary extension surface.
+- **Builder (C):** reshape the loop or the pinned spine; contributes to core.
+Mapping: A composes by name, B replaces ports, C touches the pinned spine. Posture:
+**B is the capability floor** (any power user can hand-write), **A is the eased path**
+(an agent assembles once parts exist and are registered). Hence replaceable =
+venue, data, executor, instrument (guarded by conformance); **pinned** = engine
+decisions + portfolio/position accounting + instrument-ontology root rules.
+The mechanism that makes replacement parity-safe is a **per-port conformance /
+contract suite** run against both runners — not just golden replay of the default
+wiring. A custom data source or instrument type is only trustworthy for paper/live
+if it passes that port's suite; Qi's defaults pass by construction. Cross-cutting
+implication: a **data registry** (the sibling of `STRATEGY_REGISTRY`) is the
+highest-value seam — most real asks begin with "get data from X."
+
+### D14. Instrument ontology seed now; options/futures accounting deferred
+Ship the instrument **seed as real code** — it is primitive #4, and a documented
+hierarchy gives nothing to type against (position keys, venue calendars, portfolio
+netting all reference it). Do not ship instruments as concept-doc only. Seed =
+base + `instrument_class` discriminator + `underlying` ref (D3). Ship
+`EquityInstrument` in v1; define `OptionInstrument` / `FutureInstrument` as thin
+code types so composition (incl. options-on-futures) is representable. **Defer**
+options/futures accounting and execution (multi-leg, exercise, margin / daily
+settlement, roll) to later, as concept docs (contract flavor); v1 stays equity-only.
+Boundary: option/futures accounting nudges the **pinned** portfolio/position layer,
+so each deferred asset-family concept doc must draw that accounting boundary
+explicitly and keep it out of the pinned spine until scoped in.
 
 ## Risks / Trade-offs
 
@@ -211,7 +282,22 @@ public repo; continue trading on the current private state.
   functionality incrementally; no v1/v2 gates. Scope discipline stays: fill-driven
   PnL + equity first, commissions/splits added when needed rather than promised.
 - **Agent docs live at `agents/`** (repo root), agent-first discoverability.
+- **Counted primitive set (8).** Qi's primitives are venue, portfolio, position,
+instrument, observability, config, data, engine — a closed, counted set derived
+by the parity + universality tests (D11). Reference conveniences ship as concept
+docs (recipe / contract), not as new primitives (D12).
+- **Replaceable vs pinned set by usage surfaces.** Author surface (B) customizes
+ports; agent surface (A) assembles by name; the spine (engine + accounting) stays
+pinned. Replacement is made parity-safe by per-port conformance suites (D13).
+- **Options/futures accounting deferred.** Representable via the instrument seed
+(D14), but accounting/execution semantics ship later as concept docs; v1 stays
+fully equity-only.
 
 ## Open Questions
 
-- None — all previously-open items resolved (above).
+- **Option/futures accounting scope.** Keep deferred (concept-doc boundary around
+the pinned portfolio/position layer) versus pulling e.g. options into v1 — the
+open trigger is real use cases like SPX-option VRP harvesting.
+- **Blessed reference compositions.** How many reference constructs (universe,
+data adapters) to ship as Surface-A assembly targets, versus leaving them to
+users to build from the counted set.

@@ -17,9 +17,9 @@
 
 ## 3. Primitive Seams (venue, config, observability — design D2/D6/D7)
 
-- [ ] 3.1 `quant.instruments`: `Instrument` base + `EquityInstrument`; ticker-string conveniences preserved; verify instrument tests + strategy configs construct typed instruments
+- [ ] 3.1 `quant.instruments` (D14 seed): `Instrument` base + `instrument_class` discriminator + `underlying` reference to another instrument; ship `EquityInstrument` v1; define thin, registrable `OptionInstrument` / `FutureInstrument` types so options, futures, and options-on-futures are representable (an option's `underlying` points at a future) with their accounting/execution semantics deferred to concept docs; ticker-string conveniences preserved; verify instrument tests + strategy configs construct typed instruments (spec `instruments`)
 - [ ] 3.2 `venue` module: `Venue` protocol (identity + session state + data source + execution client), `AlpacaVenue` wrapping existing calendar/handler/client, `BacktestVenue` driven by simulation timeline; verify venue session tests (holiday, rollover, fallback, naive-UTC boundary) and a deterministic-backtest-time test
-- [ ] 3.3 `quant.observability`: `span()` primitive keeping age ∥ duration distinct + `Emitter` protocol with no-op default and JSONL example; rewire engine/live telemetry through it; verify no-sink backtest emits nothing and a sink receives typed rows
+- [x] 3.3 `quant.observability`: `span()` primitive keeping age ∥ duration distinct + `Emitter` protocol with no-op default and JSONL example; rewire engine/live telemetry through it; verify no-sink backtest emits nothing and a sink receives typed rows
 - [ ] 3.4 `ConfigSource` + `FileConfigSource`/`EnvConfigSource` local-first with `ConfigSync` as the version/validation/apply shell; `SSMConfigSource` behind `quant[ssm]` preserving IMDS + version short-circuit + invalid-payload-once; verify zero-AWS startup, unchanged-version short-circuit, backend switch by config
 - [ ] 3.5 Write `agents/venue.md`, `agents/data-access.md`, `agents/config.md`, `agents/observability.md` (invariants + extension points + runnable example each); verify each doc's example runs against the branch
 
@@ -47,7 +47,7 @@
 
 ## 7. Equity Scope Trim & Baseline Install
 
-- [ ] 7.1 **Extreme equity-only trim of `quant/src/quant/`** — keep structure/patterns only (protocol/primitive seams, engine pipeline, executor seam, data protocol + MemBars + cache, backtest driver shape); **cut, not abstract**, every strategy-specific implementation in per-area deletion batches, import-layering + full suite green after each:
+- [ ] 7.1 **Extreme equity-only trim of `quant/src/quant/`** — keep structure/patterns only (protocol/primitive seams, engine pipeline, executor seam, data protocol + MemBars + cache, backtest driver shape); **cut, not abstract**, every strategy-specific implementation in per-area deletion batches, import-layering + full suite green after each. **Requires 3.3 first**: the `core/monitor_utils.py` cut below needs the engine/trader rewired to observability spans; the `ic_scheduling → time.py` decouple and stripping `ICMeta` out of kept `protocols.py`/backtest driver precede the pure deletions:
   - `utils/`: cut `regime_model.py` (dead, 37K), `am_features.py` (dead, 18K), `indicators.py` (41K TA-Lib/Numba library, imported only by cut modules + tests), `cpp_native/` (vq kernels), `bs_iv.py`, `bs_greeks.py`, `options.py`, `ic_scheduling.py` (first decouple its `et_wall_to_utc_naive` into `time.py`), `constants.py`; keep `time.py`, `positions.py`, `strategy_config.py`
   - `data/`: cut `futures/options/vix/news/dhan_data_handler.py`, `option_analytics.py`, `options_calendar.py`, `cache/futures.py` + `cache/options.py`; keep `data_handler.py` (de-strategified), `_times.py`, `cache/core.py` (arrow/frame_codec/models/stock), `ws/` live stream
   - `backtest/`: cut `executors/ic.py` + `executors/futures.py` + `prefetchers/`; strip IC/option branches from `utils.py`, `base_backtest.py`, `backtester.py`, `router.py`; keep the driver + equity fills + `backtest_data_handler.py`
@@ -81,8 +81,27 @@
 - [x] 10.3 Repo furniture: **LICENSE is now MIT** (file + `pyproject.toml` metadata align with the GitHub-declared MIT license; duplicate proprietary `quant/LICENSE` removed); README has WHY/WHAT/quickstart; root `AGENTS.md` rewritten for the public repo (orientation / invariants / command map / layout / index — no private-repo or submodule claims); `SECURITY.md` added. ⚠ **`agents/*.md` per-subsystem docs are NOT shipped yet** — blocked on task groups 3/4/5/6, which own and verify each `agents/<s>.md` with its subsystem (spec `agent-context` baseline scenario).
 - [x] 10.4 Public CI: single workflow (`.github/workflows/ci.yml`) runs uv sync + ruff lint + ruff format + the one `uv run test` suite (runner includes `tests/test_import_layering.py` and the golden two-process / golden-regression tests), on `main` push + every PR, green at export. ⚠ "Verify a fork PR passes" not literally executed — forks gate through the same `pull_request` workflow.
 
+
+## 11. Extensible Surface — primitives index, concept docs, registry, conformance (D11–D13)
+
+- [ ] 11.1 Counted-primitive index (D11): document the closed 8 (venue, portfolio, position, instrument, observability, config, data, engine), each tagged with its derivation (parity-load-bearing vs universal seam) and replaceability tier (pinned vs port) in `docs/primitives.md`, mirrored into root `AGENTS.md` and the spec index; verify the index stays in sync with the specs
+- [ ] 11.2 `docs/concepts/` under the recipe/contract distinction (D12; spec `agent-context`: Reference concept documents): establish the convention; ship **universe** as the reference contract-flavor concept (composition of instruments ∘ data ∘ membership rule) with a runnable point-in-time parity check across backtest/live (survivorship); verify the check runs
+- [ ] 11.3 Data-source registry + entry-point group `quant.datasources` (D13; spec `data-access`: Data-source registration and discovery): `DataSourceProtocol` implementations register by name; verify `get_datasource("...")` resolves a stub plugin with no SDK changes (mirror task 6.3)
+- [ ] 11.4 Per-port conformance suites (D13; spec `data-access`: Data-source conformance, `execution`: Executor conformance, `instruments`: Instrument conformance): one suite per port (venue, data, executor, config, portfolio, instrument) runnable against both backtest and live roots, each asserting that port's invariants; Qi's shipped defaults pass by construction; verify under `quant/tests/extensions/` that a conforming custom adapter passes and a violating one fails loudly
+
 ## Workflow follow-up
 
 - Open Question "public repo name" resolved by action at launch: **`Qi`** (`nodeicode/qi`), not `quant-engine`; distribution stays `quant`. The private superset is owned and changed on the private side — the `quant-alpha` rename is moot and dropped.
+
+## Tracked dangling work (keep until group 7 fully closed; checked against a green `main` at `736 passed`)  
+
+Still open for 7.1 / 7.2 / 7.3 / 7.4 — **not** yet done, `7.1`/`7.2` checkbox stays `[ ]`:
+- **Live-seam de-IC (7.1 `live/`):** remove the IC/option position-schema fields (`OptionType`, `IC_Direction`, `IC_FILL_STEP_PCT`, `IC_EXIT_*`) from kept `live/protocols.py`; drop `get_occ_symbol` from `live/utils.py`; drop the `OccSymbol` fallback in `live/executors/unified_executor.py`; update producers/consumers (trader, live executor tests). Deliberately deferred — touches the live executor seam; keep the green suite as the bound.
+- **core `_utils.py` IC leftovers (7.1 `core/`, pairs with 5.3):** `is_ic_position`, `PRODUCT_SPECS`, SND signal registry hung off `core/_utils.py`; verify each is truly unreachable after the live de-IC before dropping.
+- **base_backtest / backtest utils residual:** any remaining `Raw_Close`-only or IC comment/scaffold left by the trim.
+- **7.2 verification:** requires the deps change below; code cut (indicators.py + cpp_native/) already landed, but `7.2` needs "no module imports ta-lib/numba + ta-lib removed from deps" verified.
+- **7.3 offline-fixture goldens:** synthetic equity fixtures + `example_equity` golden — not started.
+- **7.4 extras + dep drop (deps change deferred):** `pyproject.toml` untouched this pass. Need: drop `lightgbm`, `numba`/`llvmlite`, `ta-lib`, `nanobind`/`setuptools` (now that their importers are cut) and move `alpaca-py` → `quant[alpaca]` extra, `boto3` → `quant[ssm]` extra; verify base `uv sync` is brokerless and clean.
+- **Live/AWS-dependent tests** were not run in the automated pass; re-run + CI verify before `7.1` is marked complete.
 - Archive this change after all task groups land and the public export is re-verified.
 - Verify the archived result (specs synced into the new repo's own openspec if desired).

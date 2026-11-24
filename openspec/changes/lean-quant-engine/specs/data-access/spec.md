@@ -57,6 +57,39 @@ GIVEN a ticker range already fetched once
 WHEN requested again with `use_cache=True`
 THEN no network call occurs and the returned frame equals the first fetch
 
+### Requirement: Data-source registration and discovery
+
+Data sources MUST be registerable by name (built-in backtest and live handlers; entry-point group `quant.datasources` for extras) and resolved from strategy/runtime config, as the sibling of the strategy registry. An unknown data-source name MUST fail configuration loudly with available names listed.
+
+#### Scenario: Data source resolved by name
+GIVEN config naming a registered data source
+WHEN the runtime resolves it
+THEN the corresponding handler is constructed with the configured parameters
+
+#### Scenario: External data source via entry point
+GIVEN another distribution registers a data source under `quant.datasources`
+WHEN `get_datasource("<that-name>")` is called
+THEN the entry-point handler is returned without SDK code changes
+
+#### Scenario: Unknown data source rejected
+GIVEN config naming an unregistered data source
+WHEN the runtime resolves it
+THEN configuration fails with a message listing registered names
+
+### Requirement: Data-source conformance across environments
+
+A data source is only trustworthy for research-to-live parity if it passes the data-port conformance suite, which MUST run the same handler contract invariants against both the backtest and live roots (same column shape, timestamp normalization, settled-bar semantics). Qi's shipped defaults pass by construction; a custom handler MUST pass the suite to be treated as parity-safe.
+
+#### Scenario: Conforming custom handler accepted
+GIVEN a custom data source that satisfies the protocol contract
+WHEN its conformance suite runs against both roots
+THEN it passes and may back paper/live runs with the same shape guarantees
+
+#### Scenario: Violating handler fails loudly
+GIVEN a custom data source that mis-handles the `adjustment` argument or returns inconsistent shapes
+WHEN its conformance suite runs
+THEN it fails loudly rather than silently risking backtest/live drift
+
 ### Requirement: Backtest views
 
 The backtest handler MUST wrap pre-loaded frames and expose named slices (no re-parse per request). Requests MUST be served by index lookup into the pre-loaded frame within the handler's valid range; out-of-range requests MUST return empty frames, not raise.

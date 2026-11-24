@@ -36,6 +36,25 @@ GIVEN a developer (or agent) following the "add a strategy" recipe
 WHEN they copy it into a fresh checkout
 THEN it runs and its test passes without modification
 
+### Requirement: Reference concept documents (recipe vs contract)
+
+The repo MUST document reference compositions — amalgamations of existing primitives, e.g. a dynamic universe, a rotation, or a hedge shape — as concept documents under `docs/concepts/`, in a recipe or contract flavor, and MUST maintain a counted-primitive index of the closed primitive set so an agent knows what is safe to change.
+
+#### Scenario: Recipe concept assembled on demand
+GIVEN a non-parity-sensitive composition described in a **recipe** concept (prose + worked example)
+WHEN an agent follows it
+THEN it builds on the existing primitives without adding a new primitive
+
+#### Scenario: Contract concept enforces parity
+GIVEN a parity-sensitive composition described in a **contract** concept (prose + runnable invariant check), e.g. a universe with listing/delisting
+WHEN an agent's implementation follows it
+THEN a runnable point-in-time check verifies the composition agrees across backtest and live (survivorship), so the guarantee is provable rather than asserted
+
+#### Scenario: Counted-primitive index guides safety
+GIVEN the counted index (venue, portfolio, position, instrument, observability, config, data, engine)
+WHEN an agent reads it
+THEN each primitive is tagged with its derivation and replaceability, so the agent sees at a glance what is safe to change and at what cost
+
 ### Requirement: Context-code sync
 
 Per-subsystem docs MUST be kept coherent with the code: a change that adds/renames/removes a public extension point, protocol, or invariant MUST update the corresponding agent doc and the extensibility recipe in the same change; CI MUST flag a repo whose root `AGENTS.md` references missing documents.

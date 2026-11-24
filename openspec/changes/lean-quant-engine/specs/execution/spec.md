@@ -63,3 +63,17 @@ Backtest and live MUST agree on decision-relevant semantics: same entry/exit sig
 GIVEN the same strategy in backtest and live
 WHEN outcomes differ
 THEN the difference is explainable by fill simulation vs real order flow, and the monitor (when enabled) can surface it as execution-side, not decision-side
+
+### Requirement: Executor conformance for custom implementations
+
+A custom executor is only parity-safe if it passes the execution-port conformance suite, which MUST run the protocol contract against both the backtest and live roots (scheduling, position surface, entry/exit semantics, fill-ledger invariants). Qi's shipped backtest and live executors pass by construction; a replacement that does not pass MUST not be treated as trustworthy for paper/live.
+
+#### Scenario: Conforming custom executor accepted
+GIVEN a custom executor that honors the protocol contract
+WHEN its conformance suite runs against both roots
+THEN it passes and may run a strategy across backtest and live
+
+#### Scenario: Contract-violating executor fails loudly
+GIVEN a custom executor that slips scheduling or position semantics
+WHEN its conformance suite runs
+THEN it fails loudly rather than silently risking drift between research and production
