@@ -262,6 +262,7 @@ class TestLiveExecutorClientGuard:
         assert calls[1][0][0] == "paper1"
         assert unified_exec.enter_trade.call_count == 2
 
+
 # Proves active-client selection is per-thread: threads selecting different
 # clients concurrently each read their own client's equity, and no thread
 # can redirect another thread's account selection.

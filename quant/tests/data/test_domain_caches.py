@@ -24,4 +24,3 @@ def test_stock_adjustment_keys_are_isolated(tmp_path) -> None:
 
     assert cache.get("SPY", start, end, "1m") is not None
     assert cache.get("SPY", start, end, "1m_raw") is None
-
