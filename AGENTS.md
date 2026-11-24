@@ -92,10 +92,11 @@ for the area you are changing. Links reference files in this tree (resolve-check
 | [`agents/data-access.md`](agents/data-access.md) | data | `DataSourceProtocol`, settled-bar rule, offline example |
 | [`agents/config.md`](agents/config.md) | config | version-checked poll, local-first, plugin backends |
 | [`agents/observability.md`](agents/observability.md) | observability | spans (age ∥ duration), emitter, extension |
+| [`agents/strategy-sdk.md`](agents/strategy-sdk.md) | strategy authoring | `StrategyProtocol`, one registry line, add-a-strategy example |
 
 **Scheduled under their owning task groups** (referenced, but not yet shipped):
-`agents/strategy-sdk.md` (task 6.4), and per-port conformance/extension docs
-(instruments, execution, backtest) land with their conformance suites (11.x).
+per-port conformance/extension docs (instruments, execution, backtest) land
+with their conformance suites (11.x).
 The public story is `README.md`; the why is `docs/roadmap.md`. `docs/
 extensibility.md` holds the runnable add-a-recipe examples.
 
