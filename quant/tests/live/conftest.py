@@ -61,28 +61,21 @@ def mock_monitor(request: pytest.FixtureRequest):
 
 
 @pytest.fixture(autouse=True)
-def _mock_aws_and_env():
-    """Prevent real AWS and filesystem calls in every test.
+def _mock_aws_and_env(monkeypatch):
+    """Pin the trader to the zero-AWS local-first config backend in every test.
 
-    - Patches ``quant.live.config_sync.boto3`` so ConfigSync.__init__ never
-      creates a real SSM client.  The mock SSM returns an empty-strategies
-      payload (Version 0) which passes _validate (empty list is a valid
-      "pause all" config), so poll() returns {"strategies": []} and the
-      trader starts with no active strategies.
-    - Patches ``quant.live.trader.resolve_env`` to return "staging" so no
-      .environment file is required on the developer's machine.
+    - ``QI_CONFIG_BACKEND=file`` + a nonexistent ``QI_CONFIG_FILE`` path: the
+      trader's ConfigSync polls a missing local file, gets a silent ``None``,
+      and starts with an empty strategy basket (no SSM/boto3 involved).
+    - ``QI_CONFIG_JSON`` is cleared so an ambient env config can't leak in.
+    - ``quant.live.trader.resolve_env`` is stubbed to return "staging" so no
+      .environment file is required (only reached on the opt-in
+      ``QI_CONFIG_BACKEND=ssm`` path).
     """
-    mock_ssm = MagicMock()
-    mock_ssm.get_parameter.return_value = {
-        "Parameter": {"Version": 0, "Value": '{"strategies":[]}'}
-    }
-    mock_boto3 = MagicMock()
-    mock_boto3.client.return_value = mock_ssm
-    with (
-        patch("quant.live.config_sync.boto3", mock_boto3),
-        patch("quant.live.trader.resolve_env", return_value="staging"),
-    ):
-        yield
+    monkeypatch.setenv("QI_CONFIG_BACKEND", "file")
+    monkeypatch.setenv("QI_CONFIG_FILE", ".no_such_strategies_config.json")
+    monkeypatch.delenv("QI_CONFIG_JSON", raising=False)
+    monkeypatch.setattr("quant.live.trader.resolve_env", lambda logger: "staging")
 
 
 def emitted_events(

@@ -203,6 +203,9 @@ ignore = [
 # loop-append (PERF401). Revisit during SDK cleanup (group 3/4/7); do NOT copy
 # these into new code.
 "quant/src/quant/live/**" = ["PTH101", "PTH105", "PTH110", "PTH120", "PTH123", "S105", "S110", "S310", "PERF401"]
+# ssm config backend: the IMDSv2 region probe uses a fixed private http:// IP
+# (169.254.169.254) by design — never a user-controlled URL.
+"quant/src/quant/config/ssm.py" = ["S105", "S310"]
 # strategies: .at[] is intentional for scalar perf; _v2 naming is public API
 "quant/src/quant/strategies/**" = ["PD008", "N801"]
 # standalone gc benchmark: stdout IS the result

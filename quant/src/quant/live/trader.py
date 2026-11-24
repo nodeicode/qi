@@ -26,6 +26,7 @@ import threading
 import time
 from typing import Any
 
+from quant.config import ConfigSync, EnvConfigSource, FileConfigSource
 from quant.core.engine import TradingEngine
 from quant.core.protocols import ExecutorProtocol
 from quant.data.data_handler import AlpacaDataHandler
@@ -33,7 +34,6 @@ from quant.data.data_handler import AlpacaDataHandler
 # -----------------------------------------------------------------------------
 # Imports
 # -----------------------------------------------------------------------------
-from quant.live.config_sync import ConfigSync
 from quant.live.executors.live_executor import LiveExecutor
 from quant.live.executors.unified_executor import UnifiedExecutor
 from quant.live.market_schedule import MarketSchedule
@@ -75,22 +75,72 @@ _LIVE_DATA_DELAY_MINUTES: int = int(os.environ.get("LIVE_DATA_DELAY_MINUTES", "1
 
 
 # -----------------------------------------------------------------------------
+# Runtime-config backend selection (design D6 — config local-first)
+# -----------------------------------------------------------------------------
+# Backend selection is by configuration. SSM is opt-in (production path,
+# requires the quant[ssm] extra); the default is the local file watch so a
+# zero-AWS runtime starts with no cloud config dependency.
+#   QI_CONFIG_BACKEND=file|env|ssm   explicit backend
+#   QI_CONFIG_FILE=<path>            local JSON config file (file backend)
+#   QI_CONFIG_JSON=<json>            inline JSON config (env backend)
+#   QI_AWS_REGION=<region>           SSM region override (default: IMDS)
+_CONFIG_BACKENDS = frozenset({"file", "env", "ssm"})
+
+
+def _resolve_config_backend() -> str:
+    """Resolve the runtime-config backend name from the environment.
+
+    Explicit ``QI_CONFIG_BACKEND`` wins; otherwise an inline ``QI_CONFIG_JSON``
+    selects the env backend; otherwise the local file backend is the default
+    (an absent file is a silent no-config start, still zero-AWS).
+    """
+    explicit = os.environ.get("QI_CONFIG_BACKEND", "").lower()
+    if explicit:
+        if explicit not in _CONFIG_BACKENDS:
+            raise ValueError(
+                f"unknown QI_CONFIG_BACKEND {explicit!r}; "
+                f"expected one of {sorted(_CONFIG_BACKENDS)}"
+            )
+        return explicit
+    if os.environ.get("QI_CONFIG_JSON") is not None:
+        return "env"
+    return "file"
+
+
+# -----------------------------------------------------------------------------
 # Unified Trader Class
 # -----------------------------------------------------------------------------
 class UnifiedTrader:
     def __init__(self):
         self.logger = logger
 
-        # Determine environment and SSM parameter name.
-        _env = resolve_env(self.logger)
-        _ssm_param = f"/trading/{_env}/strategies_config"
+        # Build the runtime-config backend selected by configuration and wrap
+        # it in the generic ConfigSync shell. ConfigSync is a passive poller:
+        # no threads, no callbacks; the main loop calls poll() each tick and
+        # applies any change synchronously.
+        backend = _resolve_config_backend()
+        if backend == "ssm":
+            _env = resolve_env(self.logger)
+            _ssm_param = f"/trading/{_env}/strategies_config"
+            from quant.config.ssm import (
+                SSMConfigSource,
+            )
 
-        # ConfigSync is a passive poller: no threads, no callbacks. The main
-        # loop calls poll() each tick and applies any change synchronously.
-        self.config_sync = ConfigSync(ssm_param_name=_ssm_param, logger=self.logger)
+            _source = SSMConfigSource(
+                param_name=_ssm_param,
+                region_name=os.environ.get("QI_AWS_REGION") or None,
+                logger=self.logger,
+            )
+        elif backend == "env":
+            _source = EnvConfigSource()
+        else:
+            _source = FileConfigSource(
+                path=os.environ.get("QI_CONFIG_FILE", "strategies_config.json")
+            )
+        self.config_sync = ConfigSync(source=_source, logger=self.logger)
 
-        # Initial config load — poll() returns the SSM payload or None on any
-        # error / validation failure; fall back to empty so the trader starts.
+        # Initial config load — poll() returns the backend payload or None on
+        # any error / validation failure; fall back to empty so the trader starts.
         self.config = self.config_sync.poll() or {"strategies": []}
 
         # Initialize Alpaca Clients
@@ -628,8 +678,8 @@ class UnifiedTrader:
                     time.sleep(60)
                     continue
 
-                # Poll SSM for config changes once per tick (lightweight — only
-                # parses JSON when the SSM Version actually changes).
+                # Poll the config backend once per tick (lightweight — only
+                # parses the payload when the backend version actually changes).
                 new_cfg = self.config_sync.poll()
                 if new_cfg is not None:
                     self._apply_config_update(new_cfg)
