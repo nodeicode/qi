@@ -28,12 +28,11 @@ license-files = ["LICENSE"]
 requires-python = ">=3.12,<3.13"
 
 # ── Core runtime ─────────────────────────────────────────────────────────────
-# All == pins. Changing any of these requires:
-#   1. Updating this file + running uv lock
-#   2. Re-running walk-forward backtests on both machines to verify alignment
-#   3. Clearing Numba __pycache__ if numba is bumped:
-#      find . -path "*/__pycache__/*.nbc" -delete
-#      find . -path "*/__pycache__/*.nbi" -delete
+# All == pins. Changing any of these requires updating this file + `uv lock`.
+# Deps cut with the lean-equity trim (D8): numba/llvmlite (JIT), ta-lib
+# (indicator library), lightgbm (regime), nanobind/setuptools (cpp_native).
+# Broker/AWS deps live behind extras (see [project.optional-dependencies]) so
+# the base install is brokerless: alpaca-py -> quant[alpaca], boto3 -> quant[ssm].
 dependencies = [
     # ── Numerics ──────────────────────────────────────────────────────────
     "numpy==1.26.4",
@@ -43,18 +42,13 @@ dependencies = [
     "scikit-learn==1.8.0",
     "xgboost==3.2.0",
     "joblib==1.5.3",
-    # ── JIT — version + CPU arch both affect compiled output; keep in sync ─
-    "numba==0.60.0",
-    "llvmlite==0.43.0", # must match numba's requirement exactly
     # ── ML extras (regime, NLP, signal processing) ────────────────────────
-    "hmmlearn==0.3.3",  # regime_model.py
-    "textblob==0.19.0", # news_handler.py sentiment
-    # ── Data providers ────────────────────────────────────────────────────
-    "alpaca-py==0.43.2",
-    "boto3>=1.34",  # quant.live.config_sync (SSM backend)
-    "massive==2.4.0",    # exposes `from massive import RESTClient`
+    "hmmlearn==0.3.3",
+    "textblob==0.19.0",
+    # ── Data providers (non-Alpaca; Alpine is the quant[alpaca] extra) ─────
+    "massive==2.4.0",
     "databento>=0.35.0",
-    "dhanhq==2.0.2",     # Indian equities (dhan_data_handler.py)
+    "dhanhq==2.0.2",
     # ── Storage / serialisation ───────────────────────────────────────────
     "pyarrow==21.0.0",
     # ── Visualisation ─────────────────────────────────────────────────────
@@ -62,23 +56,29 @@ dependencies = [
     # ── HTTP / env ────────────────────────────────────────────────────────
     "requests==2.32.5",
     "python-dotenv==1.2.2",
-    # ── Technical analysis ───────────────────────────────────────────────────
-    # 0.6.x ships the C library bundled in the wheel — no conda/brew needed.
-    "ta-lib==0.6.8",
-    "lightgbm>=4.6.0",
-    # ── Native kernels (quant/utils/cpp_native) ────────────────────────────
-    # The nanobind extension is built on demand at import (_ensure_built),
-    # so both setuptools (setup.py) and nanobind are runtime requirements;
-    # runtime only loads the extension when built.
-    "nanobind==3.0.0",
-    "setuptools>=78.0", # cpp_native/setup.py build_ext on first import
+]
+
+# ── Optional extras ─────────────────────────────────────────────────────────
+# Broker + AWS backends are opt-in so the base install imports and runs without
+# them (brokerless; see agents/*.md). Live trading / the live data handler need
+# `quant[alpaca]`; the SSM config backend needs `quant[ssm]`.
+[project.optional-dependencies]
+alpaca = [
+    "alpaca-py==0.43.2",
+]
+ssm = [
+    "boto3>=1.34",
 ]
 
 # ── Dev tooling — installed by default via `uv sync` (PEP 735 dev group).
 # Not part of the packaged extras: this is repo-local tooling only. Deployments
 # exclude it (`uv sync --no-dev` or an installed wheel) — see the repo docs.
+# alpaca-py + boto3 are kept here so the repo's own full suite (live + golden
+# tests) runs under `uv sync`; they are NOT runtime deps of the base package.
 [dependency-groups]
 dev = [
+    "alpaca-py==0.43.2",  # live tests / live data handler (quant[alpaca])
+    "boto3>=1.34",        # SSM config backend tests (quant[ssm])
     # ── Notebook / REPL (marimo-first) ────────────────────────────────────
     "marimo[recommended]>=0.25.2",
     "ipython==8.29.0",

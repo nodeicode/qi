@@ -6,7 +6,6 @@ import logging
 import numpy as np
 import pandas as pd
 import scipy.stats as ss
-from numba import njit
 
 from quant.utils.strategy_config import BaseStrategyConfig
 from quant.utils.time import _INTRADAY_HOUR, _INTRADAY_MINUTE, calculate_entry_time
@@ -38,78 +37,6 @@ def calculate_fill_time(
     if interval in _INTRADAY_MINUTE or interval in _INTRADAY_HOUR:
         return pd.Timestamp(entry) + datetime.timedelta(minutes=delay)
     return entry
-
-
-@njit(cache=True, fastmath=True)
-def _calc_market_fill_scalar(
-    bid: float,
-    ask: float,
-    mid: float,
-    volume: float,
-    base_slippage: float,
-    order_is_buy: int,
-    n_contracts: int,
-    is_spread: int,
-) -> float:
-    spread = ask - bid
-
-    # For spreads, the 'spread' is the synthetic width (Ask_L - Bid_S) - (Bid_L - Ask_S).
-    # This can be very wide.
-    # If is_spread=1, we assume we can get filled closer to Mid, but still pay a penalty.
-    # We use a fixed slippage model for spreads to match realistic execution (e.g. $0.05 per leg = $0.10 total).
-
-    if is_spread == 1:
-        # Fixed slippage per contract (e.g. $0.05 per leg => $0.10 total width penalty)
-        # But here prices are per share. So $0.05 per share.
-        # We assume we can fill at Mid +/- Fixed Slippage.
-        fixed_slippage = 0.05  # $5 per contract
-
-        if order_is_buy == 1:
-            fill_price = mid + fixed_slippage
-            # Cap at Ask (worst case)
-            if fill_price > ask:
-                fill_price = ask
-        else:
-            fill_price = mid - fixed_slippage
-            # Cap at Bid (worst case)
-            if fill_price < bid:
-                fill_price = bid
-
-        return fill_price
-    else:
-        # 4% of spread above mid as minimum slippage (a bit progressive for equities)
-        min_slippage = 0.04
-
-    est_liq = volume * 0.15
-    if est_liq < 3.0:
-        est_liq = 3.0
-    volume_ratio = n_contracts / est_liq
-    if volume_ratio <= 0.02:
-        volume_slippage = 0.0
-    elif volume_ratio <= 0.10:
-        volume_slippage = 0.2 * (volume_ratio / 0.10)
-    elif volume_ratio <= 0.25:
-        volume_slippage = 0.2 + 0.3 * ((volume_ratio - 0.10) / 0.15)
-    else:
-        extra = volume_ratio - 0.25
-        if extra > 0.5:
-            extra = 0.5
-        volume_slippage = 0.5 + 1.0 * extra
-
-    total_slippage = base_slippage + volume_slippage
-    if total_slippage < min_slippage:
-        total_slippage = min_slippage
-    if total_slippage > 1.0:
-        total_slippage = 1.0
-    if order_is_buy == 1:
-        fill_price = mid + (total_slippage * spread * 0.5)
-        if fill_price > ask:
-            fill_price = ask
-    else:
-        fill_price = mid - (total_slippage * spread * 0.5)
-        if fill_price < bid:
-            fill_price = bid
-    return fill_price
 
 
 def calculate_deflated_sharpe_ratio(returns, strategies_tested=100):

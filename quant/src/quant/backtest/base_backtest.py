@@ -9,7 +9,6 @@ from quant.backtest.utils import (
     calculate_metrics,
 )
 from quant.data._times import parse_naive_utc, to_naive_index, to_naive_utc
-from quant.data.data_handler import AlpacaDataHandler
 from quant.utils.strategy_config import BaseStrategyConfig
 
 
@@ -31,11 +30,15 @@ class BaseBacktester:
         self.config = config
         self.strategy = strategy
         # Underlying bar feed. Defaults to the equity Alpaca feed for existing
-        # callers; futures runs inject a futures-capable handler (e.g.
-        # ``FuturesDataHandler``) — both implement ``DataHandlerProtocol``.
-        self.data_handler = (
-            data_handler if data_handler is not None else AlpacaDataHandler()
-        )
+        # callers (behind the ``quant[alpaca]`` extra); callers may inject any
+        # ``DataHandlerProtocol`` implementation. Imported lazily so the base
+        # package import graph never requires alpaca-py (brokerless base).
+        if data_handler is not None:
+            self.data_handler = data_handler
+        else:
+            from quant.data.data_handler import AlpacaDataHandler  # quant[alpaca] extra
+
+            self.data_handler = AlpacaDataHandler()
         _s0, _s1 = parse_naive_utc(start_date, end_date)
         self.start_date = _s0.isoformat()
         self.end_date = _s1.isoformat()
