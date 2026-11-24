@@ -74,11 +74,34 @@ and `tasks.md` is the checklist — read both before working on the SDK shape.
 | `quant/src/quant/utils/` | Time, positions, indicators, config helpers |
 | `quant/src/quant/observability.py` | Spans (age ∥ duration) + emitter interface |
 | `quant/tests/` | The one test suite (incl. import-layering + goldens) |
-| `agents/` | Per-subsystem agent docs (invariants + extension points — see §5) |
-| `docs/` | quickstart / extensibility / architecture / deployment / roadmap (the why) |
+| `agents/` | Per-subsystem agent docs (invariants + extension points — see §6) |
+| `docs/` | primitives index (§5) / quickstart / extensibility / architecture / deployment / roadmap (the why) |
 | `openspec/` | Specs + the active change `openspec/changes/lean-quant-engine/` |
 
-## 5. Per-subsystem agent docs (index)
+## 5. Closed primitives (counted set — design D11)
+
+The SDK exposes a closed, counted set of **8 primitives** (full index with
+derivation + tier tags: `docs/primitives.md`; mirrored from the OpenSpec design
+D11). Keep all three in sync when the set changes:
+
+| # | Primitive | Derivation | Tier |
+|---|---|---|---|
+| 1 | venue (`quant.venue`) | parity-load-bearing | port |
+| 2 | portfolio (`quant.portfolio`) | parity-load-bearing | pinned |
+| 3 | position (`quant.portfolio`) | parity-load-bearing | pinned |
+| 4 | instrument (`quant.instruments`) | parity-load-bearing | port (type) / pinned (ontology root) |
+| 5 | observability (`quant.observability`) | universal-seam | port (emitter) / pinned (span keys) |
+| 6 | config (`quant.config`) | universal-seam | port |
+| 7 | data (`quant.data`) | universal-seam | port |
+| 8 | engine (`quant.core.engine`) | parity-load-bearing | pinned |
+
+**Parity-load-bearing** = backtest/live disagreement would lie; **universal-seam**
+= every strategy touches it. **Pinned** = the spine (least replaceable);
+**port** = replaceable behind per-port conformance (see
+`quant/tests/extensions/test_conformance_*.py`). A composed convenience (e.g. a
+universe) is a concept (`docs/concepts/`), never a 9th primitive.
+
+## 6. Per-subsystem agent docs (index)
 
 Each v1 subsystem has a dedicated agent-facing doc under `agents/` capturing
 what lives there, its local invariants, and its extension points. Read the one
@@ -100,15 +123,15 @@ with their conformance suites (11.x).
 The public story is `README.md`; the why is `docs/roadmap.md`. `docs/
 extensibility.md` holds the runnable add-a-recipe examples.
 
-## 6. Where to look next
+## 7. Where to look next
 
 - `README.md` — quickstart + CLI (`uv run quant-backtest`).
 - `docs/quickstart.md` — <5-minute clone → backtest → paper, no AWS.
 - `docs/roadmap.md` — the story/plan. **Read first.**
 - `openspec/changes/lean-quant-engine/` — specs + tasks for the current rebuild.
-- Per-subsystem agent docs (`agents/*.md`) — index in §5.
+- Per-subsystem agent docs (`agents/*.md`) — index in §6.
 
-## 7. Definition of done
+## 8. Definition of done
 
 - [ ] Fits the OpenSpec plan; does not break an invariant in §1.
 - [ ] `uv run test` green; `ruff check .` / `ruff format .` clean.

@@ -183,6 +183,9 @@ lean Non-Goals), an implementation detail behind a primitive (MemBars/prefetch
 behind *data*), or alpha-specific (the strategy itself — never a primitive).
 Numbering is for **counting / indexing** (a stable vocabulary for users and agents),
 NOT ranking — it must not imply equal replaceability (D13 assigns replaceability).
+**Shipped index:** `docs/primitives.md` tags the closed 8 with derivation
+(parity-load-bearing vs universal-seam) + tier (pinned vs port); it is mirrored
+in root `AGENTS.md` (§5) — keep all three in sync whenever the set or tags change.
 
 ### D12. Reference conveniences as concept docs, not primitives/code
 Anything that is an amalgamation of existing primitives (a dynamic universe with
