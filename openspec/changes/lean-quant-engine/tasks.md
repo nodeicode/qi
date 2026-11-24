@@ -21,7 +21,7 @@
 - [x] 3.2 `venue` module: `Venue` protocol (identity + session state + data source + execution client), `AlpacaVenue` wrapping existing calendar/handler/client, `BacktestVenue` driven by simulation timeline; verify venue session tests (holiday, rollover, fallback, naive-UTC boundary) and a deterministic-backtest-time test
 - [x] 3.3 `quant.observability`: `span()` primitive keeping age ∥ duration distinct + `Emitter` protocol with no-op default and JSONL example; rewire engine/live telemetry through it; verify no-sink backtest emits nothing and a sink receives typed rows
 - [x] 3.4 `ConfigSource` + `FileConfigSource`/`EnvConfigSource` local-first with `ConfigSync` as the version/validation/apply shell; `SSMConfigSource` behind `quant[ssm]` preserving IMDS + version short-circuit + invalid-payload-once; verify zero-AWS startup, unchanged-version short-circuit, backend switch by config
-- [ ] 3.5 Write `agents/venue.md`, `agents/data-access.md`, `agents/config.md`, `agents/observability.md` (invariants + extension points + runnable example each); verify each doc's example runs against the branch
+- [x] 3.5 Write `agents/venue.md`, `agents/data-access.md`, `agents/config.md`, `agents/observability.md` (invariants + extension points + runnable example each); verify each doc's example runs against `main` (each quickstart executed offline via `uv run python`).
 
 ## 4. Portfolio Primitives (design D4)
 
