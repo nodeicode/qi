@@ -67,7 +67,7 @@
   `backtest/utils.py` keeps `numba` imported until 7.4 drops it. Live tests run mocked
   in-suite (alpaca stubbed; zero skips; 290 live tests green) — no AWS-dependent tests block 7.1.
 - [x] 7.2 Indicators: no TA-Lib/Numba indicator library ships — `utils/indicators.py` + `cpp_native/` cut (nothing on the public path imports them; `example_equity` computes its MA-cross indicators in pure pandas); verify no shipped module imports `ta-lib`/`numba` and `ta-lib` is removed from deps
-- [ ] 7.3 Offline-fixture goldens: stable synthetic equity bars under `quant/tests/data/`; golden regression for `example_equity`; verify `uv run pytest -k golden` green in a fresh venv with no API keys
+- [x] 7.3 Offline-fixture goldens: stable synthetic equity bars under `quant/tests/data/`; golden regression for `example_equity`; verify `uv run pytest -k golden` green in a fresh venv with no API keys
 - [x] 7.4 Optional extras `quant[alpaca]` (alpaca-py) and `quant[ssm]` (boto3); verify base `uv sync` installs without them and unit suites pass brokerless
 
 ## 8. SDK Developer Experience
