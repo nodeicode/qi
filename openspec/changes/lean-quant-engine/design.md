@@ -109,12 +109,30 @@ private superset keeps its sidecar implementation as the reference extension.
 *Rationale:* the user's directive — observability should be primitives developers
 compose, and the engine should not know about monitors.
 
-### D8. Alpha extraction + equity cut (unchanged from prior plan)
-`example_equity` → private superset (`quant-alpha`), registered via `quant.strategies`
-entry points; public ships `example_equity`. Options/IC/futures modules cut
-(prefetchers, futures/ic executors, options/futures/vix/news/dhan handlers,
-options/bs/ic/regime utils, live `ic_executor.py`); CA-Lib/`cpp_native` behind
-pure-pandas fallback + optional extras. Offline synthetic equity fixtures under
+### D8. Alpha extraction + equity cut (extreme: structure and patterns only)
+The public tree keeps **structure/patterns only** — the protocol/primitive
+seams (venue/executor/data/config/observability, rebuilt in this change), the
+shared engine pipeline, the backtest driver shape, MemBars + cache, and the
+public synthetic `example_equity` (also registering the `quant.strategies`
+entry-point group). Every strategy-specific implementation is **cut, not
+abstracted**: dead alpha ML (`utils/regime_model.py`, `utils/am_features.py`),
+C++ kernels (`utils/cpp_native/`), options/IC math
+(`utils/{options,bs_iv,bs_greeks,ic_scheduling}.py` — decouple `time.py`
+first), non-equity data handlers (`futures/options/vix/news/dhan_data_handler.py`,
+`option_analytics.py`, `options_calendar.py`, futures/options caches), IC/
+futures backtest machinery (`backtest/executors/{ic,futures}.py`,
+`backtest/prefetchers/`, IC branches in the driver/utils), live IC/MLEG
+executors (`live/executors/{ic,unified}_executor.py`) and the sidecar
+(`live/monitor/sidecar.py` — kept in the private superset as the reference
+extension, D7), and core sidecar telemetry (`core/monitor_utils.py`,
+superseded by observability spans in 3.3; IC leftovers in `core/_utils.py` go
+with 5.3). The TA-Lib/Numba indicator library (`utils/indicators.py` 41K +
+`utils/cpp_native/`) is cut outright — nothing on the public path imports it;
+`example_equity` computes its indicators in pure pandas. Runtime deps collapse
+with the code: `lightgbm`, `numba`/`llvmlite`, `ta-lib`, `nanobind`/
+`setuptools` dropped entirely; `alpaca-py` → `quant[alpaca]` extra, `boto3` →
+`quant[ssm]` extra. Strategy-specific test suites are deleted in the same
+batches. Offline synthetic equity fixtures under
 `quant/tests/data/` make goldens + quickstart fully keyless.
 
 ### D9. Agent context (the critical enablement)
@@ -186,9 +204,9 @@ public repo; continue trading on the current private state.
 ## Resolved decisions
 
 - **Public repo name: `Qi`** (shipped at launch as `nodeicode/qi`;
-  distribution stays `quant`). The private-superset rename to `quant-alpha`
-  remains pending at export time — tracked in task 10.5 (OIDC trust uses
-  immutable repo IDs, so the rename stays safe).
+  distribution stays `quant`). The private superset stays on the private side
+  under its own name — no rename is needed and none is planned (OIDC trust
+  uses immutable repo IDs, so its name never affected the public cut).
 - **Portfolio is unversioned.** Ship the primitives as specified and grow/shrink
   functionality incrementally; no v1/v2 gates. Scope discipline stays: fill-driven
   PnL + equity first, commissions/splits added when needed rather than promised.

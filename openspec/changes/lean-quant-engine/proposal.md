@@ -105,20 +105,24 @@ to quant what Claude Code is to Pi): a **lean, boring, forkable foundation**.
 
 ## Impact
 
-- **Repos:** `quant` submodule → real directory on `sdk-cut` branch; new public
-  repo exported after green; private superset (renamed `quant-alpha`) keeps the
-  alpha + options/IC/futures + sidecar.
-- **Code:** engine + data + backtest + utils retained (they encode the good
-  patterns) but re-skinned behind the new primitives (venue, portfolio, typed
-  instruments, state machines); live layer (`python/`) → `quant.live`; ~15k SLOC
-  of options/IC/futures/alpha removed from the public tree; dual harness/CI/
-  openspec collapsed.
+- **Repos:** `quant` submodule → real directory on `sdk-cut` branch; the public
+  repo **`Qi`** (`nodeicode/qi`) exported after green; the private superset
+  keeps the alpha + options/IC/futures + sidecar on the private side, under its
+  own name (no rename).
+- **Code:** engine + data + backtest + utils retained **for their structure
+  and patterns only** (protocol/primitive seams, one pipeline, executor seam,
+  MemBars + cache) and re-skinned behind the new primitives (venue, portfolio,
+  typed instruments, state machines); live layer (`python/`) → `quant.live`; the
+  majority of the current tree (~25k SLOC) is cut — options/IC/futures alpha
+  machinery, ML models, C++ kernels, sidecar — leaving the pipeline + seams;
+  dual harness/CI/openspec collapsed.
 - **APIs:** public surface = `quant.core` (engine, protocols), `quant.instruments`,
   `quant.venue`, `quant.portfolio`, `quant.data`, `quant.backtest`, `quant.live`,
   `quant.strategies`, `quant.utils`, `quant.observability` + CLI. Protocols in
   single homes; convenience re-exports.
-- **Dependencies:** numpy/pandas core; `alpaca-py`, `boto3`, `ta-lib` become
-  optional extras; no compiled-kernel build in the default install.
+- **Dependencies:** numpy/pandas core; `alpaca-py` → `quant[alpaca]` extra,
+  `boto3` → `quant[ssm]` extra; `ta-lib`, `numba`, `lightgbm`, `nanobind`
+  removed entirely — no compiled kernel in any install.
 - **Operational:** prod deployment still SSM/EC2 (optional path, unchanged
   behavior); dev experience is zero-AWS by default.
 - **Docs:** agent-context layer added; all existing boundary/split documentation

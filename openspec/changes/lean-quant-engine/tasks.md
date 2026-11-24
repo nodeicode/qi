@@ -47,10 +47,17 @@
 
 ## 7. Equity Scope Trim & Baseline Install
 
-- [ ] 7.1 Cut the design-D8 module list from the export tree (prefetchers, futures/ic backtest executors, options/futures/vix/news/dhan handlers, options/bs/ic/regime utils, `live/executors/ic_executor.py`); verify import-layering and full suite green after each deletion batch
-- [ ] 7.2 Indicators: pure-pandas vectorized fallback with `quant[ta]` / `quant[native]` extras; verify indicator correctness tests pass with and without TA-Lib
+- [ ] 7.1 **Extreme equity-only trim of `quant/src/quant/`** — keep structure/patterns only (protocol/primitive seams, engine pipeline, executor seam, data protocol + MemBars + cache, backtest driver shape); **cut, not abstract**, every strategy-specific implementation in per-area deletion batches, import-layering + full suite green after each:
+  - `utils/`: cut `regime_model.py` (dead, 37K), `am_features.py` (dead, 18K), `indicators.py` (41K TA-Lib/Numba library, imported only by cut modules + tests), `cpp_native/` (vq kernels), `bs_iv.py`, `bs_greeks.py`, `options.py`, `ic_scheduling.py` (first decouple its `et_wall_to_utc_naive` into `time.py`), `constants.py`; keep `time.py`, `positions.py`, `strategy_config.py`
+  - `data/`: cut `futures/options/vix/news/dhan_data_handler.py`, `option_analytics.py`, `options_calendar.py`, `cache/futures.py` + `cache/options.py`; keep `data_handler.py` (de-strategified), `_times.py`, `cache/core.py` (arrow/frame_codec/models/stock), `ws/` live stream
+  - `backtest/`: cut `executors/ic.py` + `executors/futures.py` + `prefetchers/`; strip IC/option branches from `utils.py`, `base_backtest.py`, `backtester.py`, `router.py`; keep the driver + equity fills + `backtest_data_handler.py`
+  - `live/`: cut `executors/ic_executor.py` + `executors/unified_executor.py` + `monitor/sidecar.py` (sidecar moves to the private superset as the reference extension, D7); de-IC `live/utils.py`; keep `trader.py`, `config_sync.py`, `market_schedule.py`, `protocols.py`, `strategy_loader.py`, `monitor/emit.py`
+  - `core/`: cut `monitor_utils.py` (engine first rewired to observability spans in 3.3) and IC leftovers in `_utils.py` (with 5.3); keep `engine.py`, `protocols.py`, `sizing.py`
+  - runtime deps: drop `lightgbm`, `numba`/`llvmlite`, `ta-lib`, `nanobind`/`setuptools`; `alpaca-py` → `quant[alpaca]` extra, `boto3` → `quant[ssm]` extra (7.4)
+  - tests: delete strategy-specific suites (`futures_fixtures.py`, `test_futures_validation.py`, `test_prefetchers.py`, `test_ic_cbbo_at_or_before.py`, `test_option_greeks.py`, `test_vix_data_handler.py`, `test_futures/options_data_handler.py`, `test_native_kernels.py`, `test_utils_vectorization.py`, `test_arrow_ipc_cache.py` if it depends on futures/options caches); retarget live tests off `ic_executor`
+- [ ] 7.2 Indicators: no TA-Lib/Numba indicator library ships — `utils/indicators.py` + `cpp_native/` cut (nothing on the public path imports them; `example_equity` computes its MA-cross indicators in pure pandas); verify no shipped module imports `ta-lib`/`numba` and `ta-lib` is removed from deps
 - [ ] 7.3 Offline-fixture goldens: stable synthetic equity bars under `quant/tests/data/`; golden regression for `example_equity`; verify `uv run pytest -k golden` green in a fresh venv with no API keys
-- [ ] 7.4 Optional extras `quant[alpaca]`, `quant[ssm]`, `quant[ta]`, `quant[native]`; verify base `uv sync` installs without them and unit suites pass brokerless
+- [ ] 7.4 Optional extras `quant[alpaca]` (alpaca-py) and `quant[ssm]` (boto3); verify base `uv sync` installs without them and unit suites pass brokerless
 
 ## 8. SDK Developer Experience
 
@@ -69,14 +76,13 @@
 
 ## 10. Public Export & Launch
 
-- [x] 10.1 Public repo created as **`nodeicode/qi`** (product name **`Qi`** — resolved at launch; distribution stays `quant`) and curated squashed history pushed (2 commits on `main`). Verified: no `.gitmodules`, no `.env`, no `*.pem`/`*.key`/`*.p12` in the tree or history. `example_equity` ships in the public tree **by design** (synthetic reference strategy, task 6.2 / D8) — the private alpha does not. Private-superset rename to `quant-alpha` remains pending — see 10.5.
+- [x] 10.1 Public repo created as **`nodeicode/qi`** (product name **`Qi`** — resolved at launch; distribution stays `quant`) and curated squashed history pushed (2 commits on `main`). Verified: no `.gitmodules`, no `.env`, no `*.pem`/`*.key`/`*.p12` in the tree or history. `example_equity` ships in the public tree **by design** (synthetic reference strategy, task 6.2 / D8) — the private alpha does not. The private superset stays on the private side under its own name; no rename is needed.
 - [x] 10.2 Secret re-audit of the entire history (paths + blob content of both export commits): zero credential hits. `gitleaks` not installed; manual scan covered all blobs (no AKIA/token/private-key patterns). Only doc references to env-var *names* were found (stale `quant/AGENTS.md`) — removed in this task.
 - [x] 10.3 Repo furniture: **LICENSE is now MIT** (file + `pyproject.toml` metadata align with the GitHub-declared MIT license; duplicate proprietary `quant/LICENSE` removed); README has WHY/WHAT/quickstart; root `AGENTS.md` rewritten for the public repo (orientation / invariants / command map / layout / index — no private-repo or submodule claims); `SECURITY.md` added. ⚠ **`agents/*.md` per-subsystem docs are NOT shipped yet** — blocked on task groups 3/4/5/6, which own and verify each `agents/<s>.md` with its subsystem (spec `agent-context` baseline scenario).
 - [x] 10.4 Public CI: single workflow (`.github/workflows/ci.yml`) runs uv sync + ruff lint + ruff format + the one `uv run test` suite (runner includes `tests/test_import_layering.py` and the golden two-process / golden-regression tests), on `main` push + every PR, green at export. ⚠ "Verify a fork PR passes" not literally executed — forks gate through the same `pull_request` workflow.
-- [ ] 10.5 **Blocked (private side):** the private superset (`quant-alpha`) does not exist yet — no `nodeicode/quant-alpha` (or renamed superset). Installing the alpha's strategy distribution into the `quant.strategies` entry-point group against the public SDK, re-running CI, and confirming `get_strategy("<alpha>")` loads live cannot be verified from this repo. Action: rename/create the superset repo, wire its entry points against Qi, re-verify.
 
 ## Workflow follow-up
 
-- Open Question "public repo name" resolved by action at launch: **`Qi`** (`nodeicode/qi`), not `quant-engine`; distribution stays `quant`. The private-superset rename to `quant-alpha` is still pending (task 10.5, blocked on the private side).
+- Open Question "public repo name" resolved by action at launch: **`Qi`** (`nodeicode/qi`), not `quant-engine`; distribution stays `quant`. The private superset is owned and changed on the private side — the `quant-alpha` rename is moot and dropped.
 - Archive this change after all task groups land and the public export is re-verified.
 - Verify the archived result (specs synced into the new repo's own openspec if desired).
