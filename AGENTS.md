@@ -55,6 +55,12 @@ and `tasks.md` is the checklist — read both before working on the SDK shape.
 - `uv run ty check` — strict type checking (`quant/ty.toml`).
 - CI (`.github/workflows/ci.yml`) runs uv sync + ruff + the one suite on every
   push/PR to `main`.
+- SDK CLI (entry points under `[project.scripts]`):
+  - `uv run quant-backtest` — offline deterministic backtest (no keys).
+  - `uv run quant-paper` — zero-AWS dev dry-run, polls a local config file.
+  - `uv run quant-portfolio` — print portfolio metrics from a snapshot.
+  - `uv run quant-live` — precondition-checked live/paper trader launcher (`quant[alpaca]`).
+  See `docs/quickstart.md` and `docs/deployment.md`.
 
 ## 4. Layout
 
@@ -68,18 +74,40 @@ and `tasks.md` is the checklist — read both before working on the SDK shape.
 | `quant/src/quant/utils/` | Time, positions, indicators, config helpers |
 | `quant/src/quant/observability.py` | Spans (age ∥ duration) + emitter interface |
 | `quant/tests/` | The one test suite (incl. import-layering + goldens) |
-| `docs/` | `roadmap.md` (the why), drift / correctness / methodology docs |
+| `agents/` | Per-subsystem agent docs (invariants + extension points — see §5) |
+| `docs/` | quickstart / extensibility / architecture / deployment / roadmap (the why) |
 | `openspec/` | Specs + the active change `openspec/changes/lean-quant-engine/` |
 
-## 5. Where to look next
+## 5. Per-subsystem agent docs (index)
 
-- `README.md` — quickstart (`from quant.backtest.backtester import Backtester`).
+Each v1 subsystem has a dedicated agent-facing doc under `agents/` capturing
+what lives there, its local invariants, and its extension points. Read the one
+for the area you are changing. Links reference files in this tree (resolve-checked):
+
+| Doc | Subsystem | Covers |
+|---|---|---|
+| [`agents/decision-engine.md`](agents/decision-engine.md) | engine | one pipeline, determinism, bar-driven scheduling |
+| [`agents/portfolio.md`](agents/portfolio.md) | portfolio | fills-only Position, aggregation, snapshot/recovery |
+| [`agents/venue.md`](agents/venue.md) | venue | broker+session unit, naive-UTC, backtest determinism |
+| [`agents/data-access.md`](agents/data-access.md) | data | `DataSourceProtocol`, settled-bar rule, offline example |
+| [`agents/config.md`](agents/config.md) | config | version-checked poll, local-first, plugin backends |
+| [`agents/observability.md`](agents/observability.md) | observability | spans (age ∥ duration), emitter, extension |
+
+**Scheduled under their owning task groups** (referenced, but not yet shipped):
+`agents/strategy-sdk.md` (task 6.4), and per-port conformance/extension docs
+(instruments, execution, backtest) land with their conformance suites (11.x).
+The public story is `README.md`; the why is `docs/roadmap.md`. `docs/
+extensibility.md` holds the runnable add-a-recipe examples.
+
+## 6. Where to look next
+
+- `README.md` — quickstart + CLI (`uv run quant-backtest`).
+- `docs/quickstart.md` — <5-minute clone → backtest → paper, no AWS.
 - `docs/roadmap.md` — the story/plan. **Read first.**
 - `openspec/changes/lean-quant-engine/` — specs + tasks for the current rebuild.
-- Per-subsystem agent docs (`agents/*.md`) are part of the in-flight rebuild
-  and land with each subsystem task group.
+- Per-subsystem agent docs (`agents/*.md`) — index in §5.
 
-## 6. Definition of done
+## 7. Definition of done
 
 - [ ] Fits the OpenSpec plan; does not break an invariant in §1.
 - [ ] `uv run test` green; `ruff check .` / `ruff format .` clean.

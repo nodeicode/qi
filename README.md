@@ -22,15 +22,20 @@ uv sync                      # one distribution "quant"; pure-pandas, no system 
 uv run test                  # full suite (engine + data + backtest + live)
 ```
 
-Run a backtest with the reference equity strategy:
+Run an offline backtest with the reference equity strategy (no keys, no AWS):
 
 ```bash
-uv run python - <<'PY'
-from quant.backtest.backtester import Backtester
-from quant.strategies import get_strategy
-# (backtest wiring docs land in docs/extensibility.md)
-PY
+uv run quant-backtest
 ```
+
+Then a keyless paper dry-run that polls a local config file:
+
+```bash
+uv run quant-paper
+```
+
+See `docs/quickstart.md` for the full <5-minute clone→backtest→paper guide,
+and `docs/extensibility.md` to add your own strategy / data source / venue.
 
 `uv run test -m live` scopes the folded live layer; `-m data` / `-m backtest` the engine data/backtest tests.
 

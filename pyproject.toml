@@ -111,6 +111,13 @@ source-exclude = [
 
 [project.scripts]
 test = "quant._test_entry:main"
+# SDK CLI (argparse + stdlib; task group 8). `quant-paper` is the zero-AWS
+# keyless dev dry-run; `quant-live` needs quant[alpaca]; `quant-backtest` and
+# `quant-portfolio` are fully offline.
+quant-backtest = "quant.cli.backtest:main"
+quant-paper = "quant.cli.paper:main"
+quant-live = "quant.cli.live:main"
+quant-portfolio = "quant.cli.portfolio:main"
 
 # ── Entry-point groups ────────────────────────────────────────────────────
 # Plugin distributions extend the SDK by registering under these groups — no
@@ -201,6 +208,8 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # test files: mock fixtures use assert, magic numbers, print, and os.path
 "quant/tests/**" = ["B", "F401", "S105", "S106", "T20", "PLW0603", "E402", "PERF401", "PTH100", "PTH110", "PTH118", "PTH120"]
+# CLI console scripts: printing to stdout is the observable contract.
+"quant/src/quant/cli/**" = ["T201"]
 # Numba-heavy indicator library: many args/locals/branches are unavoidable
 "quant/src/quant/utils/indicators.py" = ["N802"]
 # data handlers: debug prints acceptable; many ctor params are by design

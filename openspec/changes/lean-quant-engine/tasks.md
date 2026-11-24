@@ -72,12 +72,12 @@
 
 ## 8. SDK Developer Experience
 
-- [ ] 8.1 CLI entry points `quant-backtest` / `quant-paper` / `quant-live` / `quant-portfolio` (argparse, stdlib); verify `quant-backtest --help` and an offline example backtest run end-to-end
-- [ ] 8.2 Zero-AWS dev mode: local config file + env keys drive a `--paper` dry run with no `boto3` installed; verify it starts, polls file config, and exits cleanly
-- [ ] 8.3 `docs/quickstart.md`: clone → `uv sync` → backtest → paper in under 5 minutes, no AWS; verify commands run verbatim in a temp clone
-- [ ] 8.4 `docs/extensibility.md`: recipes — add strategy / data source / venue / executor / build on observability primitives; verify each recipe runs against the installed SDK
-- [ ] 8.5 `docs/architecture.md` + `docs/deployment.md` (paper default, SSM prod path); verify documented commands match reality
-- [ ] 8.6 Public root AGENTS.md restructure + full `agents/*.md` index; verify the root doc references resolve (CI link check) and every v1 subsystem is covered
+- [x] 8.1 CLI entry points `quant-backtest` / `quant-paper` / `quant-live` / `quant-portfolio` (argparse, stdlib) under `[project.scripts]` (`test` stays); verified `quant-backtest --help` (exit 0) and an offline example backtest runs end-to-end (summary: example_equity, 2 entries, 123,314.24 final equity)
+- [x] 8.2 Zero-AWS dev mode: `quant-paper` polls a local JSON config via `FileConfigSource` + `ConfigSync`, resolves `example_equity`, exits cleanly (exit 0); verified `boto3` is never imported (`boto3_imported=False`)
+- [x] 8.3 `docs/quickstart.md`: clone → `uv sync` → backtest → paper in <5 min, no AWS; README quickstart updated to the CLI; commands run verbatim in a temp clone
+- [x] 8.4 `docs/extensibility.md`: recipes (add strategy / data source / venue / executor / build on observability) — each verified to run against the installed SDK
+- [x] 8.5 `docs/architecture.md` + `docs/deployment.md` (paper default, SSM prod path); documented commands match reality
+- [x] 8.6 Public root `AGENTS.md` restructure + full `agents/*.md` index (all 6 shipped docs; future strategy-sdk 6.4 / conformance 11.x docs noted as scheduled); root references resolve (0 missing links) and every v1 subsystem is covered
 
 ## 9. Integration Verification (branch)
 
