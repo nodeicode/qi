@@ -79,11 +79,11 @@
 - [x] 8.5 `docs/architecture.md` + `docs/deployment.md` (paper default, SSM prod path); documented commands match reality
 - [x] 8.6 Public root `AGENTS.md` restructure + full `agents/*.md` index (all 6 shipped docs; future strategy-sdk 6.4 / conformance 11.x docs noted as scheduled); root references resolve (0 missing links) and every v1 subsystem is covered
 
-## 9. Integration Verification (branch)
+## 9. Integration Verification (public `main`)
 
-- [ ] 9.1 Full branch suite: `uv run test`, `ruff check .`, `ruff format --check .`, pre-commit — all green on `sdk-cut`
-- [ ] 9.2 Reproduce-from-clone: temp dir clone of `sdk-cut` → `uv sync` → `uv run test` green; record quickstart wall time
-- [ ] 9.3 Equity e2e: backtest → paper smoke on `example_equity` with an emitter sink; verify span rows emit and portfolio state recovers across restart (spec `portfolio` recovery scenario)
+- [x] 9.1 Full branch suite on `main`: `uv run test`, `ruff check .`, `ruff format --check .`, pre-commit — all green
+- [x] 9.2 Reproduce-from-clone: temp dir clone of `main` → `uv sync` → `uv run test` green; record quickstart wall time (clean-tree reproduce: `uv sync` ≈7s → `quant-backtest` ≈4s → full 859-test suite 18.66s)
+- [x] 9.3 Equity e2e: backtest → paper smoke on `example_equity` with an emitter sink (`quant/tests/backtest/test_group9_equity_e2e.py`); span rows emit (`signal_evaluated` latency fields + `execution_dispatch` spans) and portfolio state recovers across restart via `Portfolio.to_snapshot`/`from_snapshot` (spec `portfolio` recovery scenario)
 
 ## 10. Public Export & Launch
 
