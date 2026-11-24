@@ -13,6 +13,7 @@ from quant.core.sizing import size_for_signal
 from quant.data.data_handler import AlpacaDataHandler
 from quant.live.protocols import LivePositionDict, LiveStrategyProtocol
 from quant.live.utils import MultiClientEquityManager
+from quant.portfolio import Fill, Side
 from quant.utils.time import calculate_entry_time
 
 
@@ -40,6 +41,8 @@ class UnifiedExecutor:
         clients: dict[str, TradingClient],
         data_handler: AlpacaDataHandler,
         logger: logging.Logger,
+        *,
+        portfolio=None,
     ) -> None:
         if not clients:
             raise ValueError("UnifiedExecutor requires at least one trading client.")
@@ -56,6 +59,16 @@ class UnifiedExecutor:
         self.data_handler = data_handler
         self.logger = logger
         self.equity_mgr = MultiClientEquityManager(clients, logger)
+        # Optional live portfolio collector (spec `portfolio`): same primitives
+        # as backtest; fills are derived from venue execution events.
+        self.portfolio = portfolio
+
+    def _resolve_venue(self) -> str:
+        """Broker account key for the calling thread's client (the venue leg)."""
+        for key, client in self.data_handler.clients.items():
+            if client is self.client:
+                return key
+        return "live"
 
     # -------------------------------------------------------------------------
     # Client resolution (thread-local)
@@ -180,6 +193,25 @@ class UnifiedExecutor:
             entry_price = float(pos.get("EntryPrice", 0.0))
             if entry_price > 0:
                 self.equity_mgr.credit(qty * entry_price)
+
+            # Live portfolio parity: a close fill exits the position through the
+            # same Position machinery as backtest. The venue fill price is not
+            # surfaced by this SDK's fill abstraction, so the close is booked at
+            # entry price — mirroring the equity_mgr credit convention above.
+            if self.portfolio is not None and qty > 0 and entry_price > 0:
+                direction = int(pos.get("Direction", 1))
+                self.portfolio.apply_fill(
+                    Fill(
+                        venue=self._resolve_venue(),
+                        symbol=symbol,
+                        side=Side.SELL if direction >= 0 else Side.BUY,
+                        qty=qty,
+                        price=entry_price,
+                        strategy=pos.get("Strategy"),
+                        timestamp=pos.get("EntryTime"),
+                        order_id=pos.get("OrderId"),
+                    )
+                )
             return True
 
         except Exception as e:
@@ -272,4 +304,21 @@ class UnifiedExecutor:
             StopLoss=signal_row.get("StopLoss"),
             TakeProfit=signal_row.get("TakeProfit"),
         )
+
+        # Live portfolio parity: an entry fill opens/re-adjusts the position
+        # through the same Position machinery as backtest. ``_bar_time``-derived
+        # fill time is used when available.
+        if self.portfolio is not None and qty > 0:
+            self.portfolio.apply_fill(
+                Fill(
+                    venue=self._resolve_venue(),
+                    symbol=ticker,
+                    side=Side.BUY if direction >= 0 else Side.SELL,
+                    qty=qty,
+                    price=float(entry_price),
+                    strategy=strategy.name,
+                    timestamp=_entry_time_iso(signal_row, strategy),
+                    order_id=order_id,
+                )
+            )
         return position

@@ -8,6 +8,7 @@ from quant.backtest.executors.base_executor import (
 )
 from quant.backtest.utils import apply_slippage, calculate_fill_time
 from quant.core.sizing import size_for_signal
+from quant.portfolio import Fill, Side
 
 
 class EquityExecutor(BaseBacktestExecutor):
@@ -66,7 +67,26 @@ class EquityExecutor(BaseBacktestExecutor):
         position["_asset_class"] = "EQUITY"
         position["_sizing"] = sizing
         position["_row"] = row
+        position["_strategy_name"] = getattr(strategy, "name", None)
         self._active_positions.append(position)
+
+        # Portfolio-collecting mode: stream the simulated entry fill through the
+        # same Position machinery the live path uses (parity by construction).
+        if self.portfolio is not None:
+            direction = int(position.get("Direction", 1))
+            shares = int(sizing.get("shares", 0) or 0)
+            if shares > 0:
+                self.portfolio.apply_fill(
+                    Fill(
+                        venue=self.venue,
+                        symbol=self.ticker,
+                        side=Side.BUY if direction >= 0 else Side.SELL,
+                        qty=shares,
+                        price=float(entry_price),
+                        strategy=getattr(strategy, "name", None),
+                        timestamp=entry_time,
+                    )
+                )
 
         return self._active_positions[-1]
 
@@ -144,6 +164,23 @@ class EquityExecutor(BaseBacktestExecutor):
         )
 
         self._running_equity += pnl
+
+        # Portfolio-collecting mode: stream the simulated exit fill through the
+        # same Position machinery the live path uses (parity by construction).
+        if self.portfolio is not None:
+            shares = int((sizing or {}).get("shares", 0) or 0)
+            if shares > 0:
+                self.portfolio.apply_fill(
+                    Fill(
+                        venue=self.venue,
+                        symbol=str(pos.get("Ticker", self.ticker)),
+                        side=Side.SELL if direction >= 0 else Side.BUY,
+                        qty=shares,
+                        price=float(exit_price),
+                        strategy=strategy_name or pos.get("_strategy_name"),
+                        timestamp=exit_time,
+                    )
+                )
 
         signal_row = pos.get("_row")
         reason_default = "Force_Close" if forced else "Signal"

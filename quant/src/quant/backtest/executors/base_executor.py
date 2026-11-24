@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
+from typing import Any
 
 import pandas as pd
 
@@ -98,6 +99,16 @@ class BaseBacktestExecutor(ABC):
     @_collateral_in_use.setter
     def _collateral_in_use(self, value: float) -> None:
         self.ctx.collateral_in_use = float(value)
+
+    @property
+    def portfolio(self) -> Any | None:
+        """Optional portfolio collector (spec `portfolio`); None disables fills."""
+        return self.ctx.portfolio
+
+    @property
+    def venue(self) -> str:
+        """Venue leg for simulated fills; defaults to ``"backtest"``."""
+        return self.ctx.venue
 
     def _update_reason_stats(self, trade: dict) -> None:
         self.ctx.update_reason_stats(trade)

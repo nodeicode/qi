@@ -25,11 +25,11 @@
 
 ## 4. Portfolio Primitives (design D4)
 
-- [ ] 4.1 `quant.portfolio.Position`: state machine per (instrument, venue) — opened → adjusting → closed, fills-only mutation; port `PositionDict` schema as the state representation with legacy aliases; verify fill-driven transition tests + parity with existing position schema consumers
-- [ ] 4.2 `quant.portfolio.Portfolio`: aggregation across strategies/venues, account state (cash, equity), realized/unrealized PnL, per-strategy + combined metrics; verify totals track positions and closed positions settle
-- [ ] 4.3 Backtest portfolio mode: multiple strategies into one or more portfolios; verify combined portfolio metrics test (spec `portfolio` scenario)
-- [ ] 4.4 Live parity + snapshot/recovery: live portfolio derives from venue fill events; snapshot persisted and recovered on restart; verify restart-recovery test
-- [ ] 4.5 Write `agents/portfolio.md`; verify its example runs
+- [x] 4.1 `quant.portfolio.Position`: state machine per (instrument, venue) — opened → adjusting → closed, fills-only mutation; port `PositionDict` schema as the state representation with legacy aliases; verify fill-driven transition tests + parity with existing position schema consumers
+- [x] 4.2 `quant.portfolio.Portfolio`: aggregation across strategies/venues, account state (cash, equity), realized/unrealized PnL, per-strategy + combined metrics; verify totals track positions and closed positions settle
+- [x] 4.3 Backtest portfolio mode: multiple strategies into one or more portfolios; verify combined portfolio metrics test (spec `portfolio` scenario)
+- [x] 4.4 Live parity + snapshot/recovery: live portfolio derives from venue fill events; snapshot persisted and recovered on restart; verify restart-recovery test
+- [x] 4.5 Write `agents/portfolio.md`; verify its example runs
 
 ## 5. Engine Determinism & State Machines (design D5)
 

@@ -55,10 +55,16 @@ class Backtester(BaseBacktester):
         ticker: str,
         verbose: bool = False,
         data_handler=None,
+        portfolio=None,
+        venue: str = "backtest",
     ):
         super().__init__(
             config, strategy, start_date, end_date, ticker, verbose, data_handler
         )
+        # Portfolio-collecting mode (spec `portfolio`): when set, simulated
+        # fills stream into this Portfolio — the same primitives as live.
+        self.portfolio = portfolio
+        self.venue = venue
 
         # When verbose, also surface logs from engine + data + strategy loggers so
         # internal decisions (signal gating, manage_trade, fills) are visible
@@ -173,6 +179,8 @@ class Backtester(BaseBacktester):
             starting_equity=self._running_equity,
             running_equity=self._running_equity,
             collateral_in_use=self._collateral_in_use,
+            portfolio=self.portfolio,
+            venue=self.venue,
             update_reason_stats=self.update_reason_stats,
         )
         return ctx

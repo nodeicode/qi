@@ -50,6 +50,7 @@ from quant.live.utils import (
     setup_logging,
 )
 from quant.observability import Span, SpanName
+from quant.portfolio import Portfolio
 
 # -----------------------------------------------------------------------------
 # Logging Setup
@@ -181,12 +182,18 @@ class UnifiedTrader:
             for s in self.strategies
         }
 
+        # Live portfolio (spec `portfolio`): aggregates fills from venue
+        # execution through the same Position machinery as backtest. Snapshot
+        # persisted + recovered alongside the trader state (see _save_state).
+        self.portfolio = Portfolio(name="live")
+
         # Initialize Unified Executor
         # Pass all registered clients so each account's equity is tracked independently.
         self.unified_executor = UnifiedExecutor(
             self.data_handler.clients,
             self.data_handler,
             self.logger,
+            portfolio=self.portfolio,
         )
 
         # Sync Trading Clients (Paper and Live)
@@ -394,6 +401,9 @@ class UnifiedTrader:
                 "last_manage_update": {
                     k: v.isoformat() for k, v in self.last_manage_update.items()
                 },
+                # portfolio snapshot (spec `portfolio` recovery): open + settled
+                # positions and account state, restored on restart.
+                "portfolio": self.portfolio.to_snapshot(),
             },
             self.lock,
             self.logger,
@@ -403,6 +413,18 @@ class UnifiedTrader:
         state = load_state(self.STATE_FILE, self.logger)
         if not state:
             return
+
+        # Restore the live portfolio snapshot (open + settled positions and
+        # account state) taken before the restart — re-derives position state
+        # from the persisted snapshot without manual intervention.
+        portfolio_snap = state.get("portfolio")
+        if isinstance(portfolio_snap, dict):
+            try:
+                self.portfolio = Portfolio.from_snapshot(portfolio_snap)
+            except Exception as e:  # fail closed on a malformed snapshot
+                self.logger.warning(
+                    "[TRADER] dropping malformed portfolio snapshot: %s", e
+                )
 
         # Restore positions
         saved_positions = state.get("active_positions", {})

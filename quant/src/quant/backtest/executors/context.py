@@ -18,6 +18,7 @@ from quant.utils.strategy_config import BaseStrategyConfig
 
 if TYPE_CHECKING:
     from quant.core.engine import TradingEngine
+    from quant.portfolio.portfolio import Portfolio
 
 
 @dataclass
@@ -42,7 +43,11 @@ class BacktestExecContext:
     running_equity: float = 0.0
     collateral_in_use: float = 0.0
 
+    # Portfolio-collecting mode (spec `portfolio`): executor fills stream into
+    # this optional Portfolio (same primitives as live). ``venue`` is the
+    # (venue, symbol) position key's venue leg for simulated fills.
+    portfolio: Portfolio | None = field(default=None)
+    venue: str = "backtest"
+
     # Callbacks
     update_reason_stats: Callable[[dict], None] = field(default=lambda _trade: None)
-
-
