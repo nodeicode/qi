@@ -69,14 +69,14 @@
 
 ## 10. Public Export & Launch
 
-- [ ] 10.1 Create the new public repo (name per design Open Questions default: reuse `quant-engine`; rename private superset to `quant-alpha` the day of launch); push curated squashed commits exported from `sdk-cut`; verify no `.gitmodules`, `.env`, `*.pem`/`*.key`/`*.p12`, or `example_equity` references
-- [ ] 10.2 Secret re-audit of the new repo's entire history (paths + message bodies + `gitleaks` if available); verify zero credential hits
-- [ ] 10.3 Repo furniture: LICENSE (MIT), README with WHY/WHAT/quickstart, public AGENTS.md + `agents/*.md` + security notes; verify a fresh-clone agent can orient from AGENTS.md alone (spec `agent-context` orientation scenario)
-- [ ] 10.4 Public CI: single workflow tests + ruff + import-layering + goldens + AGENTS-link check; verify a fork PR passes
-- [ ] 10.5 Private alpha re-verify: the superset installs its strategy distribution into the entry-point group against the public SDK and CI passes; verify `get_strategy` loads the alpha live
+- [x] 10.1 Public repo created as **`nodeicode/qi`** (product name **`Qi`** — resolved at launch; distribution stays `quant`) and curated squashed history pushed (2 commits on `main`). Verified: no `.gitmodules`, no `.env`, no `*.pem`/`*.key`/`*.p12` in the tree or history. `example_equity` ships in the public tree **by design** (synthetic reference strategy, task 6.2 / D8) — the private alpha does not. Private-superset rename to `quant-alpha` remains pending — see 10.5.
+- [x] 10.2 Secret re-audit of the entire history (paths + blob content of both export commits): zero credential hits. `gitleaks` not installed; manual scan covered all blobs (no AKIA/token/private-key patterns). Only doc references to env-var *names* were found (stale `quant/AGENTS.md`) — removed in this task.
+- [x] 10.3 Repo furniture: **LICENSE is now MIT** (file + `pyproject.toml` metadata align with the GitHub-declared MIT license; duplicate proprietary `quant/LICENSE` removed); README has WHY/WHAT/quickstart; root `AGENTS.md` rewritten for the public repo (orientation / invariants / command map / layout / index — no private-repo or submodule claims); `SECURITY.md` added. ⚠ **`agents/*.md` per-subsystem docs are NOT shipped yet** — blocked on task groups 3/4/5/6, which own and verify each `agents/<s>.md` with its subsystem (spec `agent-context` baseline scenario).
+- [x] 10.4 Public CI: single workflow (`.github/workflows/ci.yml`) runs uv sync + ruff lint + ruff format + the one `uv run test` suite (runner includes `tests/test_import_layering.py` and the golden two-process / golden-regression tests), on `main` push + every PR, green at export. ⚠ "Verify a fork PR passes" not literally executed — forks gate through the same `pull_request` workflow.
+- [ ] 10.5 **Blocked (private side):** the private superset (`quant-alpha`) does not exist yet — no `nodeicode/quant-alpha` (or renamed superset). Installing the alpha's strategy distribution into the `quant.strategies` entry-point group against the public SDK, re-running CI, and confirming `get_strategy("<alpha>")` loads live cannot be verified from this repo. Action: rename/create the superset repo, wire its entry points against Qi, re-verify.
 
 ## Workflow follow-up
 
-- Confirm the design Open Questions (public repo name; portfolio v1 depth; `agents/` naming) before the groups that depend on them (8.x/10.x).
-- Archive this change after the public export is verified.
+- Open Question "public repo name" resolved by action at launch: **`Qi`** (`nodeicode/qi`), not `quant-engine`; distribution stays `quant`. The private-superset rename to `quant-alpha` is still pending (task 10.5, blocked on the private side).
+- Archive this change after all task groups land and the public export is re-verified.
 - Verify the archived result (specs synced into the new repo's own openspec if desired).

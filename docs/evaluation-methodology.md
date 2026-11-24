@@ -41,7 +41,7 @@ live decisions agree.
 ## 3. The evaluation bar (what a deployable strategy must show)
 
 Every strategy that moves toward paper/production must come with a markdown
-(single source of truth, `quant/README.md`) containing, at minimum:
+(single source of truth, `quant/src/quant/strategies/README.md`) containing, at minimum:
 
 - **Mathematical / statistical summary** — *why* the idea works, stated as a
   mechanism, not a curve.

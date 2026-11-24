@@ -20,12 +20,13 @@ to quant what Claude Code is to Pi): a **lean, boring, forkable foundation**.
 
 ## What Changes
 
-- **BREAKING — repo unification:** `quant` submodule absorbed into `quant-engine`
+- **BREAKING — repo unification:** `quant` submodule absorbed into this repo
+  (exported to the public **`Qi`** repo)
   as a real directory on a `sdk-cut` branch (private). One uv workspace / lock /
   CI / openspec / pre-commit; `python/` folded into the distribution as
   `quant.live`; `TID251` `banned-api` removed (import-layering test + `_private.py`
   naming keep discipline).
-- **BREAKING — identity & goal:** the public product is **`quant-engine`**: an SDK
+- **BREAKING — identity & goal:** the public product is **`Qi`** (`nodeicode/qi`): an SDK
   / foundation of fully extensible primitives to **research and backtest
   strategies *and* portfolios**, and deploy them with **research → paper → live
   parity**. Parity is achieved through **deterministic structure and the
@@ -40,7 +41,7 @@ to quant what Claude Code is to Pi): a **lean, boring, forkable foundation**.
   replay; worker/protocol conventions (Protocols, `TypedDict`/dataclass
   boundaries) that downstream packages can extend.
 - **Opinionated-by-default, replaceable-everything:** the decision engine is the
-  one place quant-engine is opinionated; Data, Execution, Venue, Config, and
+  one place Qi is opinionated; Data, Execution, Venue, Config, and
   Observability ship a sensible default (Alpaca venue, local env/file config,
   emit primitives) and are swappable via Protocols.
 - **BREAKING — config is local-first:** no AWS required — default config backend

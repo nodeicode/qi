@@ -1,5 +1,5 @@
 # ============================================================
-# quant-engine — single distribution `quant` (uv-managed)
+# Qi — single distribution `quant` (uv-managed)
 #
 #   uv sync            # create venv: runtime deps + dev group
 #   uv run test        # full suite — see [project.scripts] below
@@ -17,7 +17,8 @@ name = "quant"
 version = "0.1.0"
 description = "Core quant package — ML strategies, walk-forward backtesting, multi-provider data handlers, and regime-aware utilities"
 readme = "README.md"
-license = { text = "Copyright (c) 2025 Lohit Aryan Gopikonda" }
+license = "MIT"
+license-files = ["LICENSE"]
 
 # Numba .nbc cache files in __pycache__ are compiled for CPython 3.12.
 # Using a different minor version forces Numba to recompile, which is a
@@ -75,7 +76,7 @@ dependencies = [
 
 # ── Dev tooling — installed by default via `uv sync` (PEP 735 dev group).
 # Not part of the packaged extras: this is repo-local tooling only. Deployments
-# exclude it (`uv sync --no-dev` or an installed wheel) — see quant-engine docs.
+# exclude it (`uv sync --no-dev` or an installed wheel) — see the repo docs.
 [dependency-groups]
 dev = [
     # ── Notebook / REPL (marimo-first) ────────────────────────────────────

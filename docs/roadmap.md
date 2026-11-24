@@ -78,7 +78,7 @@ Already: async sidecar, IPC queue, metrics, shadow signals, reconcile.
 - [x] **shadow-signal divergence check — already shipped** (`signal_drift`, `manage_exit_drift`, `shadow_bar_missing`, order↔position reconcile). Verified against `python/monitor/sidecar.py` + `quant/core/monitor_utils.py`; now documented.
  
 ### P2 — Evaluation discipline *(partially exists — complete)*
-`quant/README.md` already requires per-strategy markdown with param-sensitivity
+`quant/src/quant/strategies/README.md` already requires per-strategy markdown with param-sensitivity
 and Monte Carlo. Lift the bar:
 - [ ] (Take as TODO for later, build in public) Enforce **out-of-sample**: backtests report results on an untouched hold-out
       window; document the train/test split rule.

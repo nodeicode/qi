@@ -10,12 +10,12 @@ typed instruments, deterministic state machines** — informed by Nautilus Trade
 shapes (venue-bound execution clients, positions per instrument+venue, typed
 instruments, event/state-machine semantics) while staying a lean SDK, not a
 platform. Unify on a `sdk-cut` branch of the private repo; export a clean public
-repo named **quant-engine**.
+repo named **`Qi`** (`nodeicode/qi`).
 
 ## Goals / Non-Goals
 
 **Goals:**
-- `quant-engine` as a foundation SDK: research/backtest strategies **and
+- `Qi` as a foundation SDK: research/backtest strategies **and
   portfolios**; research → paper → live parity via deterministic structure +
   explicit state machines.
 - Nautilus-informed typing (Protocols first, `TypedDict`/dataclass boundaries,
@@ -40,7 +40,7 @@ repo named **quant-engine**.
 ## Decisions
 
 ### D1. Identity & package shape
-Public product name **quant-engine**; distribution stays `quant` (imports under
+Public product name **`Qi`**; distribution stays `quant` (imports under
 one root). `python/` folds into `src/quant/live/`; CLI entry points
 `quant-backtest` / `quant-paper` / `quant-live` / `quant-portfolio`.
 *Alternatives:* two-package uv workspace — two import roots contradict "one
@@ -160,7 +160,7 @@ verifies. Rollback = discard branch/public repo, keep trading on private.
   v1 scope is fill-driven PnL + equity; splits/dividends/complex cost basis are
   documented as later extensions, not silently half-supported.
 - **Non-async, no-bus architecture hits throughput limits for high-frequency
-  live trading** → acceptable and declared: quant-engine targets strategy
+  live trading** → acceptable and declared: Qi targets strategy
   cadence (bars > 1s); the bar-driven scheduling spec caps the live load already.
 
 ## Migration Plan
@@ -185,9 +185,10 @@ public repo; continue trading on the current private state.
 
 ## Resolved decisions
 
-- **Public repo name: reuse `quant-engine`.** The private superset renames to
-  `quant-alpha` the day of launch (OIDC trust uses immutable repo IDs, so the
-  rename is safe).
+- **Public repo name: `Qi`** (shipped at launch as `nodeicode/qi`;
+  distribution stays `quant`). The private-superset rename to `quant-alpha`
+  remains pending at export time — tracked in task 10.5 (OIDC trust uses
+  immutable repo IDs, so the rename stays safe).
 - **Portfolio is unversioned.** Ship the primitives as specified and grow/shrink
   functionality incrementally; no v1/v2 gates. Scope discipline stays: fill-driven
   PnL + equity first, commissions/splits added when needed rather than promised.
