@@ -77,8 +77,7 @@ def _calc_market_fill_scalar(
 
         return fill_price
     else:
-        # we assume 4% of spread above mid as minimum slippage
-        # this applies to both equities and single leg options, NOTE: it's a bit progressive for equities
+        # 4% of spread above mid as minimum slippage (a bit progressive for equities)
         min_slippage = 0.04
 
     est_liq = volume * 0.15

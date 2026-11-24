@@ -47,14 +47,25 @@
 
 ## 7. Equity Scope Trim & Baseline Install
 
-- [ ] 7.1 **Extreme equity-only trim of `quant/src/quant/`** — keep structure/patterns only (protocol/primitive seams, engine pipeline, executor seam, data protocol + MemBars + cache, backtest driver shape); **cut, not abstract**, every strategy-specific implementation in per-area deletion batches, import-layering + full suite green after each. **Requires 3.3 first**: the `core/monitor_utils.py` cut below needs the engine/trader rewired to observability spans; the `ic_scheduling → time.py` decouple and stripping `ICMeta` out of kept `protocols.py`/backtest driver precede the pure deletions:
+- [x] 7.1 **Extreme equity-only trim of `quant/src/quant/`** — keep structure/patterns only (protocol/primitive seams, engine pipeline, executor seam, data protocol + MemBars + cache, backtest driver shape); **cut, not abstract**, every strategy-specific implementation in per-area deletion batches, import-layering + full suite green after each. **Requires 3.3 first**: the `core/monitor_utils.py` cut below needs the engine/trader rewired to observability spans; the `ic_scheduling → time.py` decouple and stripping `ICMeta` out of kept `protocols.py`/backtest driver precede the pure deletions:
   - `utils/`: cut `regime_model.py` (dead, 37K), `am_features.py` (dead, 18K), `indicators.py` (41K TA-Lib/Numba library, imported only by cut modules + tests), `cpp_native/` (vq kernels), `bs_iv.py`, `bs_greeks.py`, `options.py`, `ic_scheduling.py` (first decouple its `et_wall_to_utc_naive` into `time.py`), `constants.py`; keep `time.py`, `positions.py`, `strategy_config.py`
   - `data/`: cut `futures/options/vix/news/dhan_data_handler.py`, `option_analytics.py`, `options_calendar.py`, `cache/futures.py` + `cache/options.py`; keep `data_handler.py` (de-strategified), `_times.py`, `cache/core.py` (arrow/frame_codec/models/stock), `ws/` live stream
   - `backtest/`: cut `executors/ic.py` + `executors/futures.py` + `prefetchers/`; strip IC/option branches from `utils.py`, `base_backtest.py`, `backtester.py`, `router.py`; keep the driver + equity fills + `backtest_data_handler.py`
-  - `live/`: cut `executors/ic_executor.py` + `executors/unified_executor.py` + `monitor/sidecar.py` (sidecar moves to the private superset as the reference extension, D7); de-IC `live/utils.py`; keep `trader.py`, `config_sync.py`, `market_schedule.py`, `protocols.py`, `strategy_loader.py`, `monitor/emit.py`
+  - `live/`: cut `executors/ic_executor.py` + `monitor/sidecar.py` (sidecar moves to the private superset as the reference extension, D7); de-IC `live/utils.py`, `protocols.py`; keep `trader.py`, `config_sync.py`, `market_schedule.py`, `strategy_loader.py`, `monitor/emit.py`. **Reconciled**: `executors/unified_executor.py` + `executors/live_executor.py` are **kept** and de-IC'd to equity-only — `UnifiedExecutor` is the equity live executor wired into `trader.py` and `get_executor`
   - `core/`: cut `monitor_utils.py` (engine first rewired to observability spans in 3.3) and IC leftovers in `_utils.py` (with 5.3); keep `engine.py`, `protocols.py`, `sizing.py`
   - runtime deps: drop `lightgbm`, `numba`/`llvmlite`, `ta-lib`, `nanobind`/`setuptools`; `alpaca-py` → `quant[alpaca]` extra, `boto3` → `quant[ssm]` extra (7.4)
   - tests: delete strategy-specific suites (`futures_fixtures.py`, `test_futures_validation.py`, `test_prefetchers.py`, `test_ic_cbbo_at_or_before.py`, `test_option_greeks.py`, `test_vix_data_handler.py`, `test_futures/options_data_handler.py`, `test_native_kernels.py`, `test_utils_vectorization.py`, `test_arrow_ipc_cache.py` if it depends on futures/options caches); retarget live tests off `ic_executor`
+
+  **Closed (de-IC sweeps):** the remaining IC/option surface in the kept core/live/data
+  path was cleared — engine `_utils.py` IC branch + `is_ic_position`, live schema/executor
+  OccSymbol surface (`is_live_ic_position` → fail-closed `is_live_position`), option-only
+  data-handler methods (`_get_occ_symbol`, `fetch_real_time_option_data`, OCC-quote
+  emission), `get_occ_symbol`, and stale IC docstrings — full suite green at close
+  (726 passed / 95.33% coverage). `PRODUCT_SPECS`, `SIGNAL_REGISTRY`, `AssetClass` are
+  **retained by design** (`sizing.py` / signal routing consume them). Deferred to 7.4 (deps,
+  not marked): `pyproject.toml` extras/dep drop; the `numba`-backed fill-slippage scalar in
+  `backtest/utils.py` keeps `numba` imported until 7.4 drops it. Live tests run mocked
+  in-suite (alpaca stubbed; zero skips; 290 live tests green) — no AWS-dependent tests block 7.1.
 - [ ] 7.2 Indicators: no TA-Lib/Numba indicator library ships — `utils/indicators.py` + `cpp_native/` cut (nothing on the public path imports them; `example_equity` computes its MA-cross indicators in pure pandas); verify no shipped module imports `ta-lib`/`numba` and `ta-lib` is removed from deps
 - [ ] 7.3 Offline-fixture goldens: stable synthetic equity bars under `quant/tests/data/`; golden regression for `example_equity`; verify `uv run pytest -k golden` green in a fresh venv with no API keys
 - [ ] 7.4 Optional extras `quant[alpaca]` (alpaca-py) and `quant[ssm]` (boto3); verify base `uv sync` installs without them and unit suites pass brokerless
@@ -93,15 +104,26 @@
 
 - Open Question "public repo name" resolved by action at launch: **`Qi`** (`nodeicode/qi`), not `quant-engine`; distribution stays `quant`. The private superset is owned and changed on the private side — the `quant-alpha` rename is moot and dropped.
 
-## Tracked dangling work (keep until group 7 fully closed; checked against a green `main` at `736 passed`)  
+## Tracked dangling work (keep until group 7 fully closed; checked against a green `main`)  
 
-Still open for 7.1 / 7.2 / 7.3 / 7.4 — **not** yet done, `7.1`/`7.2` checkbox stays `[ ]`:
-- **Live-seam de-IC (7.1 `live/`):** remove the IC/option position-schema fields (`OptionType`, `IC_Direction`, `IC_FILL_STEP_PCT`, `IC_EXIT_*`) from kept `live/protocols.py`; drop `get_occ_symbol` from `live/utils.py`; drop the `OccSymbol` fallback in `live/executors/unified_executor.py`; update producers/consumers (trader, live executor tests). Deliberately deferred — touches the live executor seam; keep the green suite as the bound.
-- **core `_utils.py` IC leftovers (7.1 `core/`, pairs with 5.3):** `is_ic_position`, `PRODUCT_SPECS`, SND signal registry hung off `core/_utils.py`; verify each is truly unreachable after the live de-IC before dropping.
-- **base_backtest / backtest utils residual:** any remaining `Raw_Close`-only or IC comment/scaffold left by the trim.
+Closed with 7.1 (de-IC sweeps):
+- ✅ **Live-seam de-IC (7.1 `live/`):** done — `live/protocols.py` slimmed to the equity schema
+  with the fail-closed `is_live_position` boundary validator; `get_occ_symbol` dropped from
+  `live/utils.py`; `unified_executor` runs Ticker-only (exit + position build); trader recovery
+  and live tests repointed (fail-closed malformed-record recovery still covered).
+- ✅ **core `_utils.py` IC leftovers (7.1 `core/`, pairs with 5.3):** `is_ic_position` dropped;
+  `PRODUCT_SPECS`, `SIGNAL_REGISTRY`, `AssetClass` **retained by design** (still consumed by
+  `sizing.py` at ~186 and signal routing).
+- ✅ **base_backtest / backtest utils residual:** stale IC/option prose comments removed (backtester,
+  base_backtest, backtest utils) and the dead private `_compute_realized_equity_curve` /
+  `_calculate_additive_performance_metrics` scaffold deleted (zero callers); `Raw_Close` notes
+  retained (sanctioned backtest-only execution).
+- ✅ **Live/AWS-dependent tests:** no longer blockers — live tests run mocked in-suite (alpaca
+  stubbed via conftest, zero skips, 290 live tests green).
+
+Still open for 7.2 / 7.3 / 7.4 — `7.2`/`7.3`/`7.4` checkboxes stay `[ ]`:
 - **7.2 verification:** requires the deps change below; code cut (indicators.py + cpp_native/) already landed, but `7.2` needs "no module imports ta-lib/numba + ta-lib removed from deps" verified.
 - **7.3 offline-fixture goldens:** synthetic equity fixtures + `example_equity` golden — not started.
 - **7.4 extras + dep drop (deps change deferred):** `pyproject.toml` untouched this pass. Need: drop `lightgbm`, `numba`/`llvmlite`, `ta-lib`, `nanobind`/`setuptools` (now that their importers are cut) and move `alpaca-py` → `quant[alpaca]` extra, `boto3` → `quant[ssm]` extra; verify base `uv sync` is brokerless and clean.
-- **Live/AWS-dependent tests** were not run in the automated pass; re-run + CI verify before `7.1` is marked complete.
 - Archive this change after all task groups land and the public export is re-verified.
 - Verify the archived result (specs synced into the new repo's own openspec if desired).

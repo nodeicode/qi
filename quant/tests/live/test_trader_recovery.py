@@ -94,14 +94,9 @@ class TestUnifiedTraderRecovery(unittest.TestCase):
                     "Env": "paper",
                     "OrderId": "old_order_1",
                     "Qty": 10,
-                    "OccSymbol": "SPY 240621C00420000",
-                    "Expiration": "2024-06-21",
-                    "NContracts": 1,
-                    "K_LP": 400.0,
-                    "K_SP": 410.0,
-                    "K_SC": 430.0,
-                    "K_LC": 440.0,
-                    "OrderIds": {"LP": "id1", "SP": "id2", "SC": "id3", "LC": "id4"},
+                    "EntryTime": "2024-06-21T14:00:00+00:00",
+                    "Direction": 1,
+                    "EntryPrice": 100.0,
                 }
             ]
         }
@@ -147,20 +142,13 @@ class TestUnifiedTraderRecovery(unittest.TestCase):
             "Env": "paper",
             "OrderId": "ok_1",
             "Qty": 10,
-            "OccSymbol": "SPY 240621C00420000",
-            "Expiration": "2024-06-21",
-            "NContracts": 1,
-            "K_LP": 400.0,
-            "K_SP": 410.0,
-            "K_SC": 430.0,
-            "K_LC": 440.0,
-            "OrderIds": {"LP": "id1", "SP": "id2", "SC": "id3", "LC": "id4"},
+            "EntryTime": "2024-06-21T14:00:00+00:00",
+            "Direction": 1,
+            "EntryPrice": 100.0,
         }
         malformed = {
             "Strategy": "RecoveryStrategy",
-            "Ticker": "SPY",
-            "OrderId": "bad_1",
-            "Qty": 10,  # missing Env / OccSymbol / strikes / OrderIds
+            "Ticker": "SPY",  # missing Env / Qty / OrderId — fail closed
         }
         mock_load_state.return_value = {
             "active_positions": {

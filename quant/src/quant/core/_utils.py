@@ -18,8 +18,6 @@ What lives here
   Relocated upstream (import from ``quant.utils``): ``build_position_dict``
   → ``quant.utils.positions``; ``closed_bar_asof`` / ``bar_close_utc`` /
   session clocks + ``SESSION_CLOCKS`` → ``quant.utils.time``.
-  ``is_ic_position`` (the IC envelope validator) lives here — previously
-  ``quant.utils.options``, removed with the equity-only trim.
 * Extracted engine internals      — fetch_data, fetch_manage_data,
                                     call_manage_trade
   These three were private TradingEngine methods called only from
@@ -40,7 +38,6 @@ import math
 import time
 from collections.abc import (  # noqa: F401  (re-exported type)
     Callable,
-    Mapping,
     Sequence,
 )
 from dataclasses import dataclass
@@ -56,20 +53,6 @@ from quant.utils.strategy_config import BaseStrategyConfig
 from quant.utils.time import bar_close_utc, closed_bar_asof
 
 _log = logging.getLogger(__name__)
-
-
-def is_ic_position(pos: Mapping[str, object]) -> bool:
-    """Boundary lift: true when *pos* carries a complete, numeric IC bundle.
-
-    Validates (never ``cast``) required keys so a partial record from crash
-    recovery or a malformed producer cannot be silently treated as a valid IC
-    position.  Rejects on any missing strike or a non-numeric strike value;
-    ``IC_Direction`` needs only to be present.
-    """
-    for key in ("K_LP", "K_SP", "K_SC", "K_LC"):
-        if not isinstance(pos.get(key), (int, float)):
-            return False
-    return "IC_Direction" in pos
 
 
 class SignalType(StrEnum):
@@ -1036,29 +1019,16 @@ def classify_manage_exit(
     resolved_exit_idx = int(exit_idx)
     exit_ts = pd.Timestamp(manage_df.index[resolved_exit_idx])
     exit_class: ManageExitClass = "strategy_manage"
-    simple_ic_path = float(getattr(config, "STOP_LOSS_PERCENT", 10.0)) >= 10.0
+    # Generic max-hold class: any position held past MAX_HOLDING_MINUTES is a
+    # forced max_hold exit (the IC proximity exit path was removed with the
+    # equity-only trim).
     entry = position.get("EntryTime", position.get("entry_time"))
-    if simple_ic_path and entry is not None:
+    if entry is not None:
         with contextlib.suppress(Exception):
             entry_ts = pd.Timestamp(entry)
             elapsed = (exit_ts - entry_ts).total_seconds() / 60
             if elapsed >= float(config.MAX_HOLDING_MINUTES):
                 exit_class = "max_hold"
-    # Strike reads go through the typed IC envelope validated at the boundary;
-    # a non-IC position never reaches the proximity path so a missing strike
-    # cannot silently disable it with a default 0.
-    if simple_ic_path and exit_class != "max_hold" and is_ic_position(position):
-        k_sp = position["K_SP"]
-        k_sc = position["K_SC"]
-        buffer = float(config.IC_PROXIMITY_EXIT)
-        spot = float(manage_df.iloc[resolved_exit_idx]["Close"])
-        if (
-            k_sp > 0
-            and k_sc > 0
-            and buffer > 0
-            and ((k_sc - spot) < buffer or (spot - k_sp) < buffer)
-        ):
-            exit_class = "proximity"
     return {
         "exit_class": exit_class,
         "exit_idx": resolved_exit_idx,
@@ -1117,11 +1087,6 @@ class MonitorTelemetry:
             spot = float(closed.iloc[-1]["Close"]) if not closed.empty else None
             for observed in self._manage_observations:
                 position = observed.position
-                if is_ic_position(position):
-                    k_sp: float | None = position["K_SP"]
-                    k_sc: float | None = position["K_SC"]
-                else:
-                    k_sp = k_sc = None
                 self._publish(
                     {
                         "kind": "manage_evaluated",
@@ -1140,15 +1105,7 @@ class MonitorTelemetry:
                         ),
                         "live_exit": observed.decision["exit_class"],
                         "exit_bar": observed.decision["exit_bar"],
-                        "K_SP": k_sp,
-                        "K_SC": k_sc,
                         "S": spot,
-                        "dist_sp": (spot - float(k_sp))
-                        if spot is not None and k_sp is not None
-                        else None,
-                        "dist_sc": (float(k_sc) - spot)
-                        if spot is not None and k_sc is not None
-                        else None,
                         "config_snapshot": snapshot_config(context.config),
                     }
                 )

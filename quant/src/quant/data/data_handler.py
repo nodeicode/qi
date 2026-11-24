@@ -15,7 +15,6 @@ from alpaca.data.enums import Adjustment, DataFeed
 from alpaca.data.historical import OptionHistoricalDataClient, StockHistoricalDataClient
 from alpaca.data.requests import (
     OptionBarsRequest,
-    OptionSnapshotRequest,
     StockBarsRequest,
     StockSnapshotRequest,
 )
@@ -1092,96 +1091,6 @@ class AlpacaDataHandler:
         else:
             self._cache.clear_cache()
 
-    def _get_occ_symbol(self, ticker, strike, expiration, opt_type):
-        year = expiration[2:4]
-        month = expiration[5:7]
-        day = expiration[8:10]
-        cp = "C" if opt_type.lower() == "call" else "P"
-        strike_int = round(strike * 1000)
-        return f"{ticker.upper()}{year}{month}{day}{cp}{strike_int:08d}"
-
-    def fetch_real_time_option_data(
-        self,
-        ticker: str,
-        strike: float,
-        expiration: str,
-        opt_type: str,
-        start_dt,
-        end_dt,
-        interval: str = "1m",
-    ) -> pd.DataFrame:
-        """
-        Fetch real-time option data (Bars) from Alpaca.
-        Synthesizes bid/ask from High/Low/Close similar to OptionDataHandler.
-        """
-        try:
-            occ_symbol = self._get_occ_symbol(ticker, strike, expiration, opt_type)
-            timeframe = self._map_interval_to_timeframe(interval)
-
-            req_start = (
-                pd.to_datetime(start_dt).to_pydatetime()
-                if isinstance(start_dt, (str, pd.Timestamp))
-                else start_dt
-            )
-            req_end = (
-                pd.to_datetime(end_dt).to_pydatetime()
-                if isinstance(end_dt, (str, pd.Timestamp))
-                else end_dt
-            )
-
-            # Ensure UTC if naive, assuming input was UTC-aware or meant to be UTC
-            if req_start.tzinfo is None:
-                req_start = req_start.replace(tzinfo=UTC)
-            if req_end.tzinfo is None:
-                req_end = req_end.replace(tzinfo=UTC)
-
-            req = OptionBarsRequest(
-                symbol_or_symbols=[occ_symbol],
-                timeframe=timeframe,
-                start=req_start,
-                end=req_end,
-            )
-
-            bars_dict = self.option_historical_client.get_option_bars(req)
-            if (
-                occ_symbol != bars_dict[occ_symbol][0].symbol
-                or len(bars_dict[occ_symbol]) == 0
-            ):
-                return pd.DataFrame()
-
-            bar_list = bars_dict[occ_symbol]
-
-            data = [
-                {
-                    "timestamp": bar.timestamp,
-                    "open": bar.open,
-                    "high": bar.high,
-                    "low": bar.low,
-                    "close": bar.close,
-                    "volume": bar.volume,
-                }
-                for bar in bar_list
-            ]
-
-            df = pd.DataFrame(data)
-            df = df.set_index("timestamp")
-            df = df.sort_index()
-
-            # Synthesize mid/bid/ask
-            df["mid"] = (df["high"] + df["low"]) / 2.0
-            spread_pct = 0.05
-            spread = df["mid"] * spread_pct
-            df["bid"] = df["mid"] - spread / 2.0
-            df["ask"] = df["mid"] + spread / 2.0
-
-            return df
-
-        except Exception as e:
-            self.logger.error(
-                "Error fetching option data for %s strike %s: %s", ticker, strike, e
-            )
-            return pd.DataFrame()
-
     def get_option_history(
         self, symbol: str, start_dt, end_dt, interval: str = "1m"
     ) -> pd.DataFrame:
@@ -1246,56 +1155,6 @@ class AlpacaDataHandler:
 
         except Exception as e:
             self.logger.error("Error fetching option history for %s: %s", symbol, e)
-            return pd.DataFrame()
-
-    def get_latest_option_quotes(self, symbols: list[str]) -> pd.DataFrame:
-        """
-        Fetch latest option snapshots for a list of OCC symbols.
-        Returns DataFrame index by symbol with synthesized bid/ask if needed or direct from snapshot.
-        """
-        if not symbols:
-            return pd.DataFrame()
-
-        try:
-            req = OptionSnapshotRequest(symbol_or_symbols=symbols)
-            snapshots = self.option_historical_client.get_option_snapshot(req)
-
-            data = []
-            for symbol, snap in snapshots.items():
-                # Prefer latest_quote if available, else latest_trade
-                # Snapshot object has .latest_quote, .latest_trade etc.
-                est_price = 0.0
-                bid = 0.0
-                ask = 0.0
-
-                if snap.latest_quote:
-                    bid = snap.latest_quote.bid_price
-                    ask = snap.latest_quote.ask_price
-                    if bid > 0 and ask > 0:
-                        est_price = (bid + ask) / 2.0
-                    else:
-                        est_price = (
-                            snap.latest_trade.price if snap.latest_trade else 0.0
-                        )
-                elif snap.latest_trade:
-                    est_price = snap.latest_trade.price
-                    # Synthetic spread
-                    bid = est_price * 0.99
-                    ask = est_price * 1.01
-
-                if est_price > 0:
-                    data.append(
-                        {"OccSymbol": symbol, "bid": bid, "ask": ask, "mid": est_price}
-                    )
-
-            df = pd.DataFrame(data)
-            if not df.empty:
-                df = df.set_index("OccSymbol")
-            return df
-
-        except Exception as e:
-            self.logger.error("Error fetching option snapshots: %s", e)
-            # Return empty DF so caller handles it gracefully
             return pd.DataFrame()
 
     def get_option_expirations(

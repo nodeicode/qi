@@ -365,19 +365,6 @@ def parse_interval(interval: str) -> datetime.timedelta:
     return datetime.timedelta(minutes=60)
 
 
-def get_occ_symbol(ticker: str, strike: float, expiration: str, opt_type: str) -> str:
-    """
-    Generate OCC Option Symbol string.
-    Format: Ticker (6 chars) + Year (2) + Month (2) + Day (2) + Type (1) + Strike (8)
-    """
-    year = expiration[2:4]
-    month = expiration[5:7]
-    day = expiration[8:10]
-    cp = "C" if opt_type.lower() == "call" else "P"
-    strike_int = round(strike * 1000)
-    return f"{ticker.upper()}{year}{month}{day}{cp}{strike_int:08d}"
-
-
 # -----------------------------------------------------------------------------
 # System Helpers
 # -----------------------------------------------------------------------------

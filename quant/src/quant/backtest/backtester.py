@@ -136,7 +136,7 @@ class Backtester(BaseBacktester):
         self._asset_class = self._detect_asset_class(df_signals)
         self.logger.info(f"Asset class: {self._asset_class}")
 
-        # Prefetch option/manage data upfront (same as live's data caching)
+        # Prefetch manage-data upfront (same as live's data caching)
         self._prefetch_data(df_signals)
 
         # Main simulation loop — mirrors trader.process_strategy

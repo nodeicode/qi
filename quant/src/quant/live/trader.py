@@ -40,7 +40,7 @@ from quant.live.market_schedule import MarketSchedule
 from quant.live.protocols import (
     LivePositionDict,
     LiveStrategyProtocol,
-    is_live_ic_position,
+    is_live_position,
 )
 from quant.live.strategy_loader import load_strategies
 from quant.live.utils import (
@@ -366,7 +366,7 @@ class UnifiedTrader:
                 # Boundary validation at recovery: a partial/malformed record is
                 # dropped + logged loudly (fail closed on that record) instead
                 # of being cast in and later traded with required keys missing.
-                if isinstance(p, dict) and is_live_ic_position(p):
+                if isinstance(p, dict) and is_live_position(p):
                     restored.append(p)
                 else:
                     self.logger.warning(

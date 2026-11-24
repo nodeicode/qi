@@ -16,20 +16,17 @@ class PositionDict(TypedDict, total=False):
     """Core position schema consumed by ``manage_trade``.
 
     Contains **only** the universal contract fields every position type uses.
-    Strategy/options-specific extras (IC strikes, direction, metrics) are
-    passed through via ``**extra`` in ``build_position_dict`` — parity
-    requires the data travel, not that this type know about it.
-
-    The IC strike/direction bundle used to be declared once as a shared typed
-    envelope (``quant.utils.options.ICMeta``, removed with the equity-only
-    trim); the validator ``is_ic_position`` now lives in
-    ``quant.core._utils``. Cross-cutting code reads IC fields only after that
-    boundary check (never ``cast``, never ``dict.get(..., 0)``).
+    Strategy-specific extras (strikes, direction, metrics) are passed through
+    via ``**extra`` in ``build_position_dict`` — parity requires the data
+    travel, not that this type know about it.  The shared typed IC envelope
+    and its boundary validators were removed with the equity-only trim;
+    cross-cutting code reads live positions only through the boundary check
+    in ``quant.live.protocols`` (never ``cast``, never ``dict.get(..., 0)``).
 
     The only sanctioned ``*PositionDict`` subclass is the live layer's
     ``LivePositionDict`` (``quant.live.protocols``): it extends the shared
     contract with live-only execution/broker fields and is guarded at entry by
-    ``is_live_ic_position``. Do not add further subclasses; strategy fields
+    ``is_live_position``. Do not add further subclasses; strategy fields
     belong in a strategy-local store, not on this dict.
     """
 

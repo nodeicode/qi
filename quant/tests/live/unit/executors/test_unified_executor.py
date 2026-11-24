@@ -306,9 +306,7 @@ class TestEnterTradeRouting:
 class TestExitTrade:
     def test_missing_symbol_returns_false(self) -> None:
         ex = _make_executor()
-        pos = cast(
-            "LivePositionDict", {"AssetType": "EQUITY"}
-        )  # no Ticker or OccSymbol
+        pos = cast("LivePositionDict", {"AssetType": "EQUITY"})  # no Ticker
 
         result = ex.exit_trade(pos, qty=1)
 
@@ -340,28 +338,7 @@ class TestExitTrade:
 
         ex.equity_mgr.credit.assert_called_once_with(10 * 100.0)
 
-    def test_exit_uses_occ_symbol_when_present(self) -> None:
-        import quant.live.executors.unified_executor as _ue_mod
-
-        ex = _make_executor()
-        _client_mock(ex).submit_order.return_value = _make_order()
-        occ = "SPY250321C00450000"
-        pos = cast(
-            "LivePositionDict",
-            {
-                "AssetType": "EQUITY",
-                "OccSymbol": occ,
-                "Ticker": "SPY",
-                "EntryPrice": 2.0,
-            },
-        )
-
-        with patch.object(_ue_mod, "MarketOrderRequest") as mock_mor:
-            ex.exit_trade(pos, qty=1)
-
-        assert mock_mor.call_args.kwargs["symbol"] == occ
-
-    def test_exit_falls_back_to_ticker_when_no_occ_symbol(self) -> None:
+    def test_exit_uses_ticker_symbol(self) -> None:
         import quant.live.executors.unified_executor as _ue_mod
 
         ex = _make_executor()

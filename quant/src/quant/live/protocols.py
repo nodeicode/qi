@@ -84,71 +84,34 @@ class LivePositionDict(PositionDict, total=False):
 
     The single sanctioned ``PositionDict`` subclass in the codebase: it extends
     the backtest-compatible shared contract with live-only execution/broker
-    fields (Strategy, Ticker, Env, OccSymbol, IC legs, OrderIds) that are passed
-    as **extra kwargs to ``engine.build_position``.
+    fields (Strategy, Ticker, Env, Qty, PositionSize, Vol_Ratio, OrderIds) that
+    are passed as ``**extra`` kwargs to ``engine.build_position``.
 
-    A record is only trustworthy as a live IC position once it passes
-    ``is_live_ic_position`` — do not construct or ``cast`` one without running
-    that boundary guard. Unknown strategy/options fields ride the record as
-    flat extras; do not add further subclasses.
+    A record is only trustworthy as a live position once it passes
+    ``is_live_position`` — do not construct or ``cast`` one without running
+    that boundary guard. Option/iron-condor envelope fields were removed with
+    the equity-only trim; unknown strategy fields ride the record as flat
+    extras; do not add further subclasses.
     """
 
     # ── Common live fields ──────────────────────────────────────────────────
     Strategy: str
     Ticker: str
-    OccSymbol: str
     Qty: int
     Env: str
     PositionSize: float
     Vol_Ratio: float
-
-    # ── Option-specific ─────────────────────────────────────────────────────
-    OptionType: str
-    Strike: float
-    Expiration: str
-
-    # ── Iron Condor specific ─────────────────────────────────────────────────
-    IC_Direction: int
-    K_LP: float
-    K_SP: float
-    K_SC: float
-    K_LC: float
-    OccSymbol_LP: str
-    OccSymbol_SP: str
-    OccSymbol_SC: str
-    OccSymbol_LC: str
-    NContracts: int
-    FillCredit: float
-    FillCredit_SP: float
-    FillCredit_SC: float
-    FillDebit_LP: float
-    FillDebit_LC: float
-    NetCreditDollars: float
-    Collateral: float
     OrderIds: dict[str, Any]
-    EntryMid: float
-    EntrySlippage: float
-    EntryRefCredit: float
-    EntrySlippageFromRef: float
-    # Exit fill-loop config — persisted at entry so close uses same parameters.
-    IC_FILL_STEP_PCT: float
-    IC_EXIT_MAX_ATTEMPTS: int
-    IC_EXIT_MAX_WAIT_SECS: int
-    IC_EXIT_MIN_POLL_SECS: int
 
 
-def is_live_ic_position(position: PositionDict) -> TypeGuard[LivePositionDict]:
-    required = (
-        "Strategy",
-        "Ticker",
-        "Env",
-        "OccSymbol",
-        "Expiration",
-        "NContracts",
-        "K_LP",
-        "K_SP",
-        "K_SC",
-        "K_LC",
-        "OrderIds",
-    )
+def is_live_position(position: PositionDict) -> TypeGuard[LivePositionDict]:
+    """Boundary lift: true when *pos* carries the live-equity execution fields.
+
+    Validates (never ``cast``) the keys the live executor and trader need to
+    close and account for a position, so a partial record from crash recovery
+    or a malformed producer cannot be silently treated as a tradable live
+    position (fail closed on that record).  The option/iron-condor envelope
+    fields were removed with the equity-only trim.
+    """
+    required = ("Strategy", "Ticker", "Env", "Qty", "OrderId")
     return all(key in position for key in required)

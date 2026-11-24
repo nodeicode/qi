@@ -137,7 +137,6 @@ pass-through shims were removed):
 - **`direction(signal)`** (engine) → `+1` or `-1`
 - **`size_for_signal(signal, *, config, **kw)`** — `quant.core.sizing` registry dispatch by asset class; **live executors call it directly** (the old `engine.size_for_signal` shim is gone)
 - **`build_position(entry_time, entry_price, direction, signal, confidence, **extra)`** (engine)
-- **`build_ic_position(entry_time, underlying_price, ic_direction, signal, confidence, strikes, **extra)`** (engine)
 
 ### Helpers (`quant.core._utils` unless noted)
 - **`select_strike(underlying_price, opt_type, config)`** — ATM/ITM/OTM strike selection (live option executor)

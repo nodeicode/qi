@@ -16,7 +16,7 @@ Pipeline (via ``process_strategy``)
 ------------------------------------
 1. **Signals** — ``run_signals`` calls ``calculate_indicators`` + ``generate_signals``.
 2. **Manage** — ``call_manage_trade`` injects indicators and runs ``manage_trade``.
-3. **Sizing & position** — ``route`` / ``size_*`` / ``build_position`` / ``build_ic_position``.
+3. **Sizing & position** — ``route`` / ``size_*`` / ``build_position``.
 """
 
 from __future__ import annotations
@@ -732,7 +732,3 @@ class TradingEngine:
             self.strategy.config,
             **extra,
         )
-
-    # IC positions were built by the shared free function
-    # ``quant.utils.options.build_ic_position`` (removed with the
-    # equity-only trim).

@@ -18,7 +18,6 @@ Covers:
   - load_state: missing file, valid JSON, malformed JSON
   - save_state: atomic write (no .tmp remains), round-trip, overwrites
   - parse_interval: minutes, hours, days, invalid → 60-min fallback
-  - get_occ_symbol: correct OCC format for calls and puts
 """
 
 from __future__ import annotations
@@ -46,7 +45,6 @@ import pytest
 from quant.live.utils import (
     EquityManager,
     MultiClientEquityManager,
-    get_occ_symbol,
     load_config,
     load_state,
     parse_interval,
@@ -476,65 +474,6 @@ class TestParseInterval:
 
     def test_large_minute_value(self) -> None:
         assert parse_interval("240m") == datetime.timedelta(minutes=240)
-
-
-# ===========================================================================
-# get_occ_symbol
-# ===========================================================================
-
-
-class TestGetOccSymbol:
-    def test_call_atm(self) -> None:
-        symbol = get_occ_symbol("SPY", 450.0, "2025-03-21", "call")
-
-        assert symbol == "SPY250321C00450000"
-
-    def test_put_atm(self) -> None:
-        symbol = get_occ_symbol("SPY", 440.0, "2025-03-21", "put")
-
-        assert symbol == "SPY250321P00440000"
-
-    def test_fractional_strike_250_decimal(self) -> None:
-        # 150.5 → strike_int = round(150.5 * 1000) = 150500
-        symbol = get_occ_symbol("AAPL", 150.5, "2025-01-17", "put")
-
-        assert symbol == "AAPL250117P00150500"
-
-    def test_ticker_uppercased(self) -> None:
-        symbol = get_occ_symbol("spy", 400.0, "2025-06-20", "call")
-
-        assert symbol.startswith("SPY")
-
-    def test_strike_zero_padded_to_8_digits(self) -> None:
-        # 5.0 → 5000 → "00005000"
-        symbol = get_occ_symbol("VIX", 5.0, "2025-02-19", "call")
-
-        assert "00005000" in symbol
-
-    def test_large_strike_fits(self) -> None:
-        # 4500.0 → 4500000 → "04500000"
-        symbol = get_occ_symbol("SPX", 4500.0, "2025-12-31", "call")
-
-        assert "04500000" in symbol
-
-    def test_expiration_date_parsed_correctly(self) -> None:
-        # year[2:4]="26", month[5:7]="11", day[8:10]="20"
-        symbol = get_occ_symbol("TSLA", 200.0, "2026-11-20", "call")
-
-        assert "261120" in symbol
-
-    def test_call_produces_uppercase_c(self) -> None:
-        # Use a ticker without 'C' or 'P' to isolate the type character
-        symbol = get_occ_symbol("QQQ", 450.0, "2025-03-21", "call")
-
-        assert "C" in symbol
-        assert "P" not in symbol
-
-    def test_put_produces_uppercase_p(self) -> None:
-        symbol = get_occ_symbol("SPY", 450.0, "2025-03-21", "put")
-
-        assert "P" in symbol
-        assert "C" not in symbol
 
 
 # ===========================================================================

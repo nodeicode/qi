@@ -156,13 +156,11 @@ class UnifiedExecutor:
 
     def exit_trade(self, pos: LivePositionDict, qty: float) -> bool:
         """
-        Close a position with a market order on the primary symbol.
-
-        Sells ``OccSymbol`` (falling back to ``Ticker``) and credits the
+        Close a position with a market order on its ``Ticker`` and credit the
         position's recorded entry value back to the active client's equity.
         """
         try:
-            symbol = pos.get("OccSymbol") or pos.get("Ticker")
+            symbol = pos.get("Ticker")
             if not symbol:
                 self.logger.error(
                     f"[{pos.get('Strategy', '?')}] exit_trade: no symbol in position for {pos.get('Ticker', '?')}."
@@ -262,7 +260,6 @@ class UnifiedExecutor:
             confidence,
             Strategy=strategy.name,
             Ticker=ticker,
-            OccSymbol=ticker,
             UnderlyingEntryPrice=entry_price,
             Qty=qty,
             PositionSize=float(
