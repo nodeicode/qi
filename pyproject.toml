@@ -112,6 +112,13 @@ source-exclude = [
 [project.scripts]
 test = "quant._test_entry:main"
 
+# ── Entry-point groups ────────────────────────────────────────────────────
+# Plugin distributions extend the SDK by registering under these groups — no
+# SDK code changes. The built-in reference strategy also registers here so the
+# quant.strategies group is exercised end-to-end against the shipped dist.
+[project.entry-points."quant.strategies"]
+example_equity = "quant.strategies.example_equity.strategy:ExampleEquityStrategy"
+
 # ── uv configuration ──────────────────────────────────────────────────────
 
 [tool.uv]

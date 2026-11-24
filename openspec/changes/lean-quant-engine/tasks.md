@@ -42,7 +42,7 @@
 
 - [x] 6.1 Remove the private-alpha strategy from the public tree — **accomplished at export (task 10.1)**: the public repo ships the *synthetic* reference strategy (task 6.2) and the private alpha never enters the tree, so `example_equity` remains the public reference by design (D8). Reconciled against the now-public `main` (the old "move to private superset" step is historical; no private-alpha code remains in the export tree).
 - [x] 6.2 Add `quant/strategies/example_equity/` (synthetic MA-cross, `StrategyProtocol` + `BaseStrategyConfig` subclass); verify `get_strategy("example_equity")` returns the class and an engine constructs it
-- [ ] 6.3 Register the `quant.strategies` entry-point group; verify a stub plugin distribution in tests resolves via `get_strategy` with no SDK changes
+- [x] 6.3 Register the `quant.strategies` entry-point group (pyproject `[project.entry-points."quant.strategies"]`, SDK's `example_equity` also registers there); `get_strategy` resolves built-ins then entry points and lists available names on a `ValueError`; a hermetic stub-plugin distribution test (`quant/tests/extensions/test_strategy_entry_points.py`) resolves a plugin strategy with NO SDK changes. Reconciled against the now-public `main` (no `sdk-cut`/`branch` wording remains in the strategy-sdk spec).
 - [ ] 6.4 Write `agents/strategy-sdk.md`; verify its add-a-strategy example runs against tests
 
 ## 7. Equity Scope Trim & Baseline Install
