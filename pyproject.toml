@@ -1,0 +1,229 @@
+# ============================================================
+# quant-engine — single distribution `quant` (uv-managed)
+#
+#   uv sync            # create venv: runtime deps + dev group
+#   uv run test        # full suite — see [project.scripts] below
+#
+# The package lives at quant/src (module-root); the live layer is
+# folded in as quant.live. CI enforces lock freshness: uv lock --check.
+# ============================================================
+
+[build-system]
+requires = ["uv_build>=0.13.7,<0.14"]
+build-backend = "uv_build"
+
+[project]
+name = "quant"
+version = "0.1.0"
+description = "Core quant package — ML strategies, walk-forward backtesting, multi-provider data handlers, and regime-aware utilities"
+readme = "README.md"
+license = { text = "Copyright (c) 2025 Lohit Aryan Gopikonda" }
+
+# Numba .nbc cache files in __pycache__ are compiled for CPython 3.12.
+# Using a different minor version forces Numba to recompile, which is a
+# source of cross-machine divergence (fastmath rounding differs by CPU arch).
+# Pinned to exactly 3.12 across all machines — do not widen without clearing
+# all __pycache__/*.nbc / *.nbi files and re-running the full WF pipeline.
+requires-python = ">=3.12,<3.13"
+
+# ── Core runtime ─────────────────────────────────────────────────────────────
+# All == pins. Changing any of these requires:
+#   1. Updating this file + running uv lock
+#   2. Re-running walk-forward backtests on both machines to verify alignment
+#   3. Clearing Numba __pycache__ if numba is bumped:
+#      find . -path "*/__pycache__/*.nbc" -delete
+#      find . -path "*/__pycache__/*.nbi" -delete
+dependencies = [
+    # ── Numerics ──────────────────────────────────────────────────────────
+    "numpy==1.26.4",
+    "pandas==2.2.3",
+    "scipy==1.17.1",
+    # ── ML core — determinism-critical; bump only with full WF revalidation
+    "scikit-learn==1.8.0",
+    "xgboost==3.2.0",
+    "joblib==1.5.3",
+    # ── JIT — version + CPU arch both affect compiled output; keep in sync ─
+    "numba==0.60.0",
+    "llvmlite==0.43.0", # must match numba's requirement exactly
+    # ── ML extras (regime, NLP, signal processing) ────────────────────────
+    "hmmlearn==0.3.3",  # regime_model.py
+    "textblob==0.19.0", # news_handler.py sentiment
+    # ── Data providers ────────────────────────────────────────────────────
+    "alpaca-py==0.43.2",
+    "boto3>=1.34",  # quant.live.config_sync (SSM backend)
+    "massive==2.4.0",    # exposes `from massive import RESTClient`
+    "databento>=0.35.0",
+    "dhanhq==2.0.2",     # Indian equities (dhan_data_handler.py)
+    # ── Storage / serialisation ───────────────────────────────────────────
+    "pyarrow==21.0.0",
+    # ── Visualisation ─────────────────────────────────────────────────────
+    "matplotlib==3.10.8",
+    # ── HTTP / env ────────────────────────────────────────────────────────
+    "requests==2.32.5",
+    "python-dotenv==1.2.2",
+    # ── Technical analysis ───────────────────────────────────────────────────
+    # 0.6.x ships the C library bundled in the wheel — no conda/brew needed.
+    "ta-lib==0.6.8",
+    "lightgbm>=4.6.0",
+    # ── Native kernels (quant/utils/cpp_native) ────────────────────────────
+    # The nanobind extension is built on demand at import (_ensure_built),
+    # so both setuptools (setup.py) and nanobind are runtime requirements;
+    # runtime only loads the extension when built.
+    "nanobind==3.0.0",
+    "setuptools>=78.0", # cpp_native/setup.py build_ext on first import
+]
+
+# ── Dev tooling — installed by default via `uv sync` (PEP 735 dev group).
+# Not part of the packaged extras: this is repo-local tooling only. Deployments
+# exclude it (`uv sync --no-dev` or an installed wheel) — see quant-engine docs.
+[dependency-groups]
+dev = [
+    # ── Notebook / REPL (marimo-first) ────────────────────────────────────
+    "marimo[recommended]>=0.25.2",
+    "ipython==8.29.0",
+    "ipykernel==6.29.5",
+    "ipywidgets==8.1.8",
+    "nbformat>=5.10.4",
+    # ── Test ─────────────────────────────────────────────────────────────
+    "pytest>=8.0",
+    "pytest-cov>=6.0",
+    # ── Lint / type (also used by pre-commit hooks) ──────────────────────
+    "ruff==0.15.6",
+    "ty==0.0.23",
+    "pre-commit>=4.0.0",
+]
+
+# ── Package build (uv_build, src layout) ─────────────────────────────────────
+# Package lives at src/quant — uv_build defaults (module-root "src",
+# module-name = project name "quant") need no discovery config. The data
+# caches must never ship in sdist/wheel (source-exclude applies to both).
+[tool.uv.build-backend]
+module-root = "quant/src"
+source-exclude = [
+    "data/data_cache/**",
+    "data/option_cache/**",
+    "data/optionsa_cache/**",
+]
+
+# ── CLI entry points ──────────────────────────────────────────────────────
+# Usage: uv run test [pytest args / -m module / -k keyword] (all pass through)
+
+[project.scripts]
+test = "quant._test_entry:main"
+
+# ── uv configuration ──────────────────────────────────────────────────────
+
+[tool.uv]
+managed = true
+link-mode = "hardlink"
+# Prefer stable releases; fall back to pre-releases only when necessary.
+prerelease = "if-necessary"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short --cov=quant --cov-branch --cov-report=term-missing --cov-report=html:htmlcov --cov-fail-under=60 --import-mode=importlib"
+
+# NOTE: quant/strategies/ is intentionally excluded from coverage.
+# Strategy modules compose utilities and ML primitives that are individually
+# tested; correctness is validated end-to-end via rigorous walk-forward
+# backtests rather than unit tests.
+# TODO(public): raise coverage gate toward 90% as src coverage is rebuilt once we have a critical mass of tests there.
+[tool.coverage.report]
+omit = ["*/strategies/*", "*/tests/*", "*/utils/*", "*/data/*", "*/backtest/*"]
+
+# ── ruff ──────────────────────────────────────────────────────────────────
+# Run:  uv run ruff check .    (lint)
+#       uv run ruff format .   (format)
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes — undefined names, unused imports
+    "I",    # isort — import ordering
+    "UP",   # pyupgrade — modernise syntax for py312
+    "B",    # flake8-bugbear — likely bugs / design issues
+    "C4",   # flake8-comprehensions — unnecessary comprehension constructs
+    "SIM",  # flake8-simplify — simplifiable branches / expressions
+    "N",    # pep8-naming — PEP 8 naming conventions
+    "PD",   # pandas-vet — DataFrame API anti-patterns
+    "NPY",  # NumPy-specific rules (deprecated random API, etc.)
+    "PERF", # perflint — performance anti-patterns in hot paths
+    "PTH",  # flake8-use-pathlib — prefer pathlib over os.path
+    "S",    # flake8-bandit — security: hardcoded secrets, subprocess, etc.
+    "T20",  # flake8-print — no bare print() in library / production code
+    "TC",   # flake8-type-checking — TYPE_CHECKING block hygiene
+    "G",    # flake8-logging-format — use % args in logging calls
+    "LOG",  # flake8-logging — logging anti-patterns (root logger, etc.)
+    "PLE",  # pylint errors — genuine logic errors
+    "PLW",  # pylint warnings — code-smell patterns
+    "RUF",  # ruff-specific rules
+]
+ignore = [
+    # ── formatter-owned ───────────────────────────────────────────────
+    "E501", # line-too-long — enforced by ruff format instead
+    # ── ML / config patterns ──────────────────────────────────────────
+    "B008", # function call in default arg — intentional in strategy configs
+    # ── Numba / NumPy naming — short uppercase names are idiomatic ────
+    "N803", # argument name should be lowercase — Numba kernels use A, B, X, Y
+    "N806", # variable should be lowercase — NumPy matrices / tensors (X, W, H)
+    # ── quant / pandas conventions ────────────────────────────────────
+    # ── invariant guards ──────────────────────────────────────────────
+    "S101", # use of assert — permitted for critical pre-/post-condition guards
+    # ── readability preferences ───────────────────────────────────────
+    "SIM108", # use ternary operator — multi-line form can aid readability
+    # ── walk-forward / iterative pipeline patterns ────────────────────
+    "PLW2901", # loop variable overwritten — intentional in rolling WF loops
+    # ── Numba TYPE_CHECKING incompatibility ───────────────────────────
+    # Numba resolves annotations eagerly at JIT-compile time; moving imports
+    # under TYPE_CHECKING causes NameError inside @njit kernels.
+    "TC001", # first-party import → TYPE_CHECKING
+    "TC002", # third-party import → TYPE_CHECKING
+    "TC003", # stdlib import → TYPE_CHECKING
+    # ── logging ───────────────────────────────────────────────────────
+    "G004", # logging-f-string — f-strings are acceptable for dev/research logs
+    # ── security false-positives for ML / scientific code ─────────────
+    "S311", # random not crypto-safe — used for ML, not cryptography
+]
+
+[tool.ruff.lint.per-file-ignores]
+# test files: mock fixtures use assert, magic numbers, print, and os.path
+"quant/tests/**" = ["B", "F401", "S105", "S106", "T20", "PLW0603", "E402", "PERF401", "PTH100", "PTH110", "PTH118", "PTH120"]
+# Numba-heavy indicator library: many args/locals/branches are unavoidable
+"quant/src/quant/utils/indicators.py" = ["N802"]
+# data handlers: debug prints acceptable; many ctor params are by design
+"quant/src/quant/data/**" = ["T20"]
+# live layer (ported from the old python/) — pre-existing debt surfaced by this
+# (stricter) config: os.path usage (PTH*), conftest IMDS/urllib fetch (S1xx),
+# loop-append (PERF401). Revisit during SDK cleanup (group 3/4/7); do NOT copy
+# these into new code.
+"quant/src/quant/live/**" = ["PTH101", "PTH105", "PTH110", "PTH120", "PTH123", "S105", "S110", "S310", "PERF401"]
+# strategies: .at[] is intentional for scalar perf; _v2 naming is public API
+"quant/src/quant/strategies/**" = ["PD008", "N801"]
+# standalone gc benchmark: stdout IS the result
+"scripts/bench_gc.py" = ["T201"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["quant"]
+split-on-trailing-comma = true
+
+[tool.ruff.lint.mccabe]
+# quant signal logic routinely exceeds the default threshold of 10;
+# raise to 15 before escalating to a refactor.
+max-complexity = 15
+
+[tool.ruff.lint.pylint]
+max-args = 10       # strategy configs pass many parameters
+max-branches = 15   # signal logic has many condition branches
+max-statements = 60 # walk-forward train/test loops are statement-heavy
+max-returns = 8     # early-exit guard patterns in backtester loops
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true           # format code blocks inside docstrings
+docstring-code-line-length = "dynamic" # match the surrounding line-length

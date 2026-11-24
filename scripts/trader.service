@@ -1,0 +1,30 @@
+[Unit]
+Description=Alpaca Options Trader
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=trader
+Group=trader
+WorkingDirectory=/opt/trading
+
+# .env is created by fetch-secrets.sh during bootstrap (and refreshed by deploy.sh).
+EnvironmentFile=/opt/trading/quant/.env
+
+ExecStart=/opt/trading/python/.venv/bin/python /opt/trading/python/trader.py
+
+# On clean SIGTERM (instance shutdown), give the trader 60s to close positions gracefully.
+TimeoutStopSec=60
+KillSignal=SIGTERM
+KillMode=mixed
+
+Restart=on-failure
+RestartSec=30
+
+# Logging is handled by trader.py's FileHandler → /opt/trading/trader.log.
+# Stdout/stderr go to the systemd journal only (avoids duplicate log entries).
+SyslogIdentifier=trader
+
+[Install]
+WantedBy=multi-user.target

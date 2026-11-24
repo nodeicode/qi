@@ -1,0 +1,41 @@
+build/*
+logs/*
+
+*.env
+.vscode
+alpaca
+
+*.pyc
+trading-py.log
+
+.DS_Store
+__pycache__
+
+# uv / setuptools build artifacts
+*.egg-info/
+.venv*/
+
+# OpenTofu / Terraform local state (may contain sensitive output values)
+terraform.tfstate
+.terraform*
+terraform.tfstate.backup
+.terraform/
+*.pem
+
+.ruff_cache/
+.pytest_cache/
+
+# trader logs and state files
+trader*.log
+trader*.json
+
+# async trading monitor
+monitor_metrics.jsonl
+monitor_sidecar_state.json
+monitor_sidecar_state.json.tmp
+
+# test coverage reports
+.coverage
+htmlcov/
+# OpenTofu state backups (may contain sensitive output values)
+terraform.tfstate.*.backup

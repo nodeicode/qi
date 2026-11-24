@@ -1,0 +1,30 @@
+__pycache__
+__pycache__/*
+cache_dir
+
+**/data/data_cache
+
+**/data/*_cache
+**/data/expiration_cache.json
+logs
+*.pem
+
+.env
+
+# uv / setuptools build artifacts
+*.egg-info/
+.venv*/
+
+# pytest coverage reports
+htmlcov
+.coverage
+
+graphify-out
+# nanobind native kernels — compiled binary (build via utils/cpp_native/setup.py)
+*.so
+*.o
+
+
+# hatchling build artifacts
+dist/
+build/

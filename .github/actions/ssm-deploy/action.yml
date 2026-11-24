@@ -1,0 +1,112 @@
+name: SSM Deploy
+description: "Send deploy.sh to an EC2 instance via SSM Run Command and tail the output."
+
+inputs:
+  instance-tag-value:
+    description: "Value of the Environment tag on the target instance (staging|prod)"
+    required: true
+  branch:
+    description: "Git branch to deploy"
+    required: true
+  aws-region:
+    description: "AWS region"
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Wait for SSM agent
+      shell: bash
+      id: agent
+      run: |
+        REGION=$(echo "${{ inputs.aws-region }}" | tr -d '\r\n')
+        echo "Waiting for SSM agent on instance tagged Environment=${{ inputs.instance-tag-value }}..."
+        for i in $(seq 1 12); do
+          if ! OUT=$(aws ssm describe-instance-information \
+            --filters "Key=tag:Environment,Values=${{ inputs.instance-tag-value }}" \
+            --query "InstanceInformationList[0].[PingStatus,InstanceId]" \
+            --output text --region "$REGION" 2>&1); then
+            echo "AWS API Error: $OUT"
+            INFO="None None"
+          else
+            INFO="$OUT"
+          fi
+
+          if [[ -z "$INFO" || "$INFO" == "None" ]]; then
+            INFO="None None"
+          fi
+
+          STATUS=$(echo "$INFO" | awk '{print $1}')
+          INSTANCE_ID=$(echo "$INFO" | awk '{print $2}')
+          if [[ "$STATUS" == "Online" ]]; then
+            echo "SSM agent is online. Instance: $INSTANCE_ID"
+            echo "instance-id=$INSTANCE_ID" >> "$GITHUB_OUTPUT"
+            break
+          fi
+          echo "Attempt $i/12 — status: $STATUS. Instance may be starting. Retrying in 10s..."
+          sleep 10
+        done
+        if [[ "$STATUS" != "Online" ]]; then
+          echo "ERROR: SSM agent did not come online in time. Is the instance running?"
+          exit 1
+        fi
+
+    - name: Send SSM Run Command
+      shell: bash
+      id: ssm
+      run: |
+        REGION=$(echo "${{ inputs.aws-region }}" | tr -d '\r\n')
+        COMMAND_ID=$(aws ssm send-command \
+          --targets "Key=tag:Environment,Values=${{ inputs.instance-tag-value }}" \
+          --document-name "AWS-RunShellScript" \
+          --parameters "commands=[\"BRANCH=${{ inputs.branch }} bash /opt/trading/scripts/deploy.sh\"]" \
+          --timeout-seconds 300 \
+          --comment "GitHub Actions deploy (${{ github.sha }})" \
+          --region "$REGION" \
+          --query "Command.CommandId" \
+          --output text)
+        echo "command-id=$COMMAND_ID" >> "$GITHUB_OUTPUT"
+        echo "SSM command sent: $COMMAND_ID"
+
+    - name: Wait for command and print output
+      shell: bash
+      run: |
+        COMMAND_ID="${{ steps.ssm.outputs.command-id }}"
+        INSTANCE_ID="${{ steps.agent.outputs.instance-id }}"
+        REGION=$(echo "${{ inputs.aws-region }}" | tr -d '\r\n')
+
+        echo "Polling SSM command $COMMAND_ID on instance $INSTANCE_ID..."
+        for i in $(seq 1 60); do
+          if ! OUT=$(aws ssm get-command-invocation \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$INSTANCE_ID" \
+            --query "StatusDetails" \
+            --output text --region "$REGION" 2>&1); then
+            echo "AWS API Error: $OUT"
+            STATUS="Pending"
+          else
+            STATUS="$OUT"
+          fi
+
+          if [[ "$STATUS" == "Success" ]]; then
+            echo "Deploy succeeded."
+            aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "$INSTANCE_ID" \
+              --query "StandardOutputContent" \
+              --output text --region "$REGION"
+            exit 0
+          elif [[ "$STATUS" == "Failed" || "$STATUS" == "TimedOut" || "$STATUS" == "Cancelled" ]]; then
+            echo "ERROR: Deploy command status: $STATUS"
+            aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "$INSTANCE_ID" \
+              --query "StandardErrorContent" \
+              --output text --region "$REGION"
+            exit 1
+          fi
+          echo "[$i/60] Status: $STATUS — waiting 5s..."
+          sleep 5
+        done
+        echo "ERROR: Timed out waiting for SSM command."
+        exit 1

@@ -1,0 +1,89 @@
+name: Deploy Trader
+
+on:
+  push:
+    branches:
+      - staging # → staging
+      - main # → prod (requires manual approval gate)
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options: [staging, prod]
+
+# Only one deploy per environment at a time.
+concurrency:
+  group: deploy-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write # OIDC
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Determine target environment from the branch that triggered the workflow
+  # ---------------------------------------------------------------------------
+  setup:
+    name: Resolve Environment
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.env.outputs.environment }}
+      branch: ${{ steps.env.outputs.branch }}
+    steps:
+      - id: env
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            ENV="${{ github.event.inputs.environment }}"
+            BRANCH="${{ github.ref_name }}"
+          elif [[ "${{ github.ref_name }}" == "main" ]]; then
+            ENV="prod"
+            BRANCH="main"
+          else
+            ENV="staging"
+            BRANCH="staging"
+          fi
+          echo "environment=$ENV" >> "$GITHUB_OUTPUT"
+          echo "branch=$BRANCH"   >> "$GITHUB_OUTPUT"
+          echo "Deploying branch=$BRANCH to environment=$ENV"
+
+  # ---------------------------------------------------------------------------
+  # Run tests before any deployment
+  # ---------------------------------------------------------------------------
+  test:
+    name: Run Tests
+    needs: setup
+    uses: ./.github/workflows/ci.yml
+    secrets: inherit
+
+  # ---------------------------------------------------------------------------
+  # Deploy to the resolved environment.
+  # Staging runs immediately; prod triggers the approval gate configured in
+  # Settings → Environments → prod (required reviewers).
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: Deploy → ${{ needs.setup.outputs.environment }}
+    needs: [setup, test]
+    runs-on: ubuntu-latest
+    environment: ${{ needs.setup.outputs.environment }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Send deploy command via SSM
+        uses: ./.github/actions/ssm-deploy
+        with:
+          instance-tag-value: ${{ needs.setup.outputs.environment }}
+          branch: ${{ needs.setup.outputs.branch }}
+          aws-region: ${{ vars.AWS_REGION }}

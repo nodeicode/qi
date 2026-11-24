@@ -1,0 +1,38 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Pre-commit hooks — ruff (lint + format) + ty (strict type checking)
+#
+# First-time setup:
+#   uv run pre-commit install          # installs the git hook
+#
+# Run manually against all files:
+#   uv run pre-commit run --all-files
+#
+# Update hook revisions to latest:
+#   uv run pre-commit autoupdate
+# ─────────────────────────────────────────────────────────────────────────────
+
+repos:
+  # ── ruff: lint (with auto-fix) + format ────────────────────────────────────
+  # pre-commit manages its own isolated ruff install; pin it to the version
+  # resolved in uv.lock so lint/format behavior matches the project env.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.6
+    hooks:
+      - id: ruff
+        name: ruff (lint + autofix)
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format
+        name: ruff (format)
+
+  # ── ty: strict type checking ───────────────────────────────────────────────
+  # language: system + "uv run ty" delegates to uv so the hook runs inside
+  # the project's virtualenv (all project deps visible to the type checker).
+  - repo: local
+    hooks:
+      - id: ty
+        name: ty (type check)
+        language: system
+        entry: uv run ty
+        args: [check]
+        types: [python]
+        pass_filenames: true

@@ -1,0 +1,49 @@
+# ── ty configuration ──────────────────────────────────────────────────────────
+# Run:  uv run ty check        (strict type checking)
+#
+# This file is the single source of truth for ty rules in the quant package.
+# • CLI:      auto-discovered when running `uv run ty check` from quant/
+# • VS Code:  read via "ty.configurationFile" in .vscode/settings.json
+
+[environment]
+python-version = "3.12"
+# src layout: ty auto-detects src/ as first-party code, so `import quant.*`
+# resolves without extra search paths. (An extra-paths=[".."] entry would
+# point `import quant` at the repo root — a namespace package now that the
+# package lives in src/quant — shadowing the real package.)
+
+[rules]
+# ── binding / control-flow ────────────────────────────────────────────────────
+possibly-unresolved-reference = "error"  # variable may not be defined on all branches
+division-by-zero = "error"               # literal integer division by zero
+
+# ── call / type correctness ───────────────────────────────────────────────────
+invalid-return-type = "error"            # returned value incompatible with annotation
+invalid-argument-type = "error"          # argument type mismatch at call site
+missing-argument = "error"               # required positional argument not supplied
+call-non-callable = "error"              # calling an object that is not callable
+invalid-assignment = "error"             # wrong-type assignments
+invalid-method-override = "error"        # Liskov violations in executors
+invalid-raise = "error"                  # raising non-exceptions
+
+# ── production safety ─────────────────────────────────────────────────────────
+deprecated = "error"                     # no deprecated APIs in prod
+unused-ignore-comment = "error"          # stale ty: ignore hides real errors
+unused-type-ignore-comment = "error"     # stale type: ignore hides real errors
+
+# ── attribute / import resolution ─────────────────────────────────────────────
+# unresolved-attribute fires on third-party SDK gaps (pandas, Alpaca) that
+# ship without complete py.typed stubs (e.g. DatetimeIndex.date/.hour/.floor).
+# Suppressed at config level to avoid per-line noise; real attribute errors
+# are caught by invalid-argument-type / invalid-return-type at call sites.
+unresolved-import = "warn"               # import cannot be resolved (missing stub / pkg)
+
+# ── Per-file overrides ────────────────────────────────────────────────────────
+# Test files set attributes on MagicMock / SimpleNamespace objects that ty
+# cannot verify against the mocked type. Suppress invalid-assignment noise
+# in tests so CI only fails on real production-code type errors.
+[[overrides]]
+include = ["**/tests/**"]
+
+[overrides.rules]
+invalid-assignment = "ignore"
