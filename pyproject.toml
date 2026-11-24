@@ -126,6 +126,12 @@ quant-portfolio = "quant.cli.portfolio:main"
 [project.entry-points."quant.strategies"]
 example_equity = "quant.strategies.example_equity.strategy:ExampleEquityStrategy"
 
+# Data-source group: external distributions register a data source here with no
+# SDK change (task 11.3 / D13). The backtest handler is listed so the group is
+# exercised end-to-end; resolution is lazy (load only on request).
+[project.entry-points."quant.datasources"]
+backtest = "quant.backtest.backtest_data_handler:BacktestDataHandler"
+
 # ── uv configuration ──────────────────────────────────────────────────────
 
 [tool.uv]
