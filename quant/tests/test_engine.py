@@ -31,6 +31,7 @@ from __future__ import annotations
 import datetime
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -1236,6 +1237,96 @@ class TestBuildPosition:
     def test_extras_passed_through(self, engine):
         pos = engine.build_position(None, 50.0, -1, "SELL", 0.5, Ticker="AAPL")
         assert pos["Ticker"] == "AAPL"
+
+
+# ========================================================================
+# 17b. Position lifecycle routed through the group-4 Position primitive (5.2)
+# ========================================================================
+
+
+class TestPositionLifecycleRouting:
+    def test_build_position_keeps_canonical_request(self, engine):
+        now = datetime.datetime(2024, 6, 1, 12, 0)
+        pos = engine.build_position(now, 150.0, 1, "BUY", 0.75)
+        assert pos["EntryPrice"] == 150.0
+        assert pos["Direction"] == 1
+        assert "StopLoss" in pos
+        assert "MaxHoldTime" in pos
+
+    def test_position_from_request_routes_through_primitive(self, engine):
+        from quant.portfolio import Position, PositionState
+
+        now = datetime.datetime(2024, 6, 1, 12, 0)
+        req = engine.build_position(now, 150.0, 1, "BUY", 0.75, Ticker="AAPL", Qty=10)
+        lifecycle = engine.position_from_request(req)
+        assert isinstance(lifecycle, Position)
+        assert lifecycle.state is PositionState.OPENED
+        assert lifecycle.direction == 1
+        assert lifecycle.entry_price == 150.0
+        assert lifecycle.key == ("", "AAPL")  # backtest request has no venue yet
+
+    def test_request_roundtrip_preserves_canonical_schema(self, engine):
+        from quant.portfolio import Position, PositionState
+
+        cfg = engine.strategy.config
+        now = datetime.datetime(2024, 6, 1, 12, 0)
+        req = engine.build_position(now, 150.0, 1, "BUY", 0.75, Ticker="AAPL", Qty=10)
+        rendered = engine.position_from_request(req).to_position_dict()
+        assert rendered["EntryPrice"] == req["EntryPrice"]
+        assert rendered["StopLoss"] == req["StopLoss"] == cfg.STOP_LOSS_PERCENT
+        assert rendered["TakeProfit"] == req["TakeProfit"]
+        assert rendered["Ticker"] == "AAPL"
+        assert rendered["Direction"] == 1
+
+        # lifecycle bookkeeping keys are additive, canonical values unchanged
+        assert rendered["_state"] == PositionState.OPENED.value
+
+    def test_closed_position_never_managed(self):
+        cfg = _make_config()
+        strat = _make_strategy(config=cfg)
+        managed: list = []
+
+        def capturing_manage(pos, df):
+            managed.append(pos)
+            return -1
+
+        strat.manage_trade = capturing_manage
+        engine = _make_engine(cfg, strat, _make_data_handler())
+
+        manage_df = _make_ohlcv(5, tz=None)
+        open_pos = cast(
+            "PositionDict",
+            {"Ticker": "AAPL", "OrderId": "O-OPEN", "Direction": 1},
+        )
+        closed_pos = cast(
+            "PositionDict",
+            {
+                "Ticker": "AAPL",
+                "OrderId": "O-CLOSED",
+                "Direction": 1,
+                "_state": "closed",
+            },
+        )
+        engine.process_ticker(
+            manage_df, manage_df, "AAPL", [open_pos, closed_pos], skip_signals=True
+        )
+        # Only the OPEN position is managed; the CLOSED state machine is skipped.
+        assert len(managed) == 1
+        assert managed[0]["OrderId"] == "O-OPEN"
+
+    def test_no_ic_meta_or_build_ic_position_in_engine_path(self):
+        """5.3: the engine path carries no IC-specific branch/metadata leftovers."""
+        root = Path(__file__).resolve().parents[1] / "src" / "quant"
+        offenders = []
+        for name in ("core/engine.py", "core/_utils.py"):
+            text = (root / name).read_text()
+            for token in ("build_ic_position", "ICMeta"):
+                if token in text:
+                    offenders.append(f"{name}: {token}")
+        assert not offenders, (
+            "IC-specific branches left reachable in engine path: "
+            + "\n".join(offenders)
+        )
 
 
 # ========================================================================

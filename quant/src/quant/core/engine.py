@@ -27,7 +27,7 @@ import logging
 import time
 from collections import OrderedDict
 from collections.abc import Callable, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pandas as pd
 
@@ -46,6 +46,7 @@ from quant.core._utils import (
     signal_direction,
 )
 from quant.observability import Span, SpanName, span_key
+from quant.portfolio import Position, PositionState
 from quant.utils.positions import build_position_dict
 from quant.utils.strategy_config import BaseStrategyConfig
 from quant.utils.time import closed_bar_asof
@@ -417,6 +418,22 @@ class TradingEngine:
                         _pe_ts,
                         end_dt,
                     )
+            # Route the engine-side position lifecycle through the group-4
+            # ``Position`` primitive: a position whose state machine is CLOSED
+            # is never managed. The canonical request schema is passed through
+            # unchanged for OPENED/ADJUSTING positions, so manage_trade sees the
+            # identical dict as ever (fills/executors still drive state).
+            if (
+                Position.from_position_dict(cast("dict[str, Any]", pos)).state
+                is PositionState.CLOSED
+            ):
+                self._log.debug(
+                    "[%s] skipping CLOSED position %s on the manage path",
+                    getattr(self.strategy, "name", "?"),
+                    pos.get("Ticker", ticker),
+                )
+                continue
+
             decision = evaluate_manage_exit(
                 self.strategy,
                 pos,
@@ -722,7 +739,16 @@ class TradingEngine:
         confidence: float,
         **extra,
     ) -> PositionDict:
-        """Build canonical position dict consumed by ``manage_trade``."""
+        """Build the canonical position request consumed by ``manage_trade``.
+
+        The canonical ``PositionDict`` request schema is produced by
+        ``build_position_dict`` and returned byte-identical (executors and
+        strategies see exactly the same dict as ever) — ``keeping the canonical
+        request schema`` per the decision-engine spec. The position *lifecycle*
+        is routed through the group-4 ``Position`` primitive via
+        :meth:`position_from_request`, so the engine and the portfolio share one
+        position representation without changing the emitted request.
+        """
         return build_position_dict(
             entry_time,
             entry_price,
@@ -732,3 +758,15 @@ class TradingEngine:
             self.strategy.config,
             **extra,
         )
+
+    def position_from_request(self, position: PositionDict) -> Position:
+        """Represent a canonical engine/management position request as a ``Position``.
+
+        Routes the engine-side position lifecycle through the group-4
+        ``Position`` state machine (opened -> adjusting -> closed, fills-only).
+        ``build_position`` keeps emitting the canonical ``PositionDict`` request
+        schema unchanged; this is the bridge that treats that same schema as the
+        primitive's state representation. Accepts partial records (a backtest
+        request can lack venue/qty yet).
+        """
+        return Position.from_position_dict(cast("dict[str, Any]", position))

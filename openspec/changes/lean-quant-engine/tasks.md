@@ -34,9 +34,9 @@
 ## 5. Engine Determinism & State Machines (design D5)
 
 - [x] 5.1 Golden replay test: same (strategy, config, bars, executor events) → identical decision sequence in two processes; verify the test passes and is wired into CI
-- [ ] 5.2 Position lifecycle refactor on the engine path to route through `Position` state (group 4), keeping the canonical request schema; verify engine + existing position tests green
-- [ ] 5.3 Trim engine IC-specific branches (`build_ic_position`, ICMeta read paths); re-add only what the shared pipeline truly needs, documented; verify engine tests + new equity golden pass
-- [ ] 5.4 Write `agents/decision-engine.md` (determinism rules, adjusted-bar invariant, scheduling contract); verify its example runs
+- [x] 5.2 Position lifecycle refactor on the engine path to route through `Position` state (group 4), keeping the canonical request schema; verify engine + existing position tests green
+- [x] 5.3 Trim engine IC-specific branches (`build_ic_position`, ICMeta read paths); re-add only what the shared pipeline truly needs, documented; verify engine tests + new equity golden pass
+- [x] 5.4 Write `agents/decision-engine.md` (determinism rules, adjusted-bar invariant, scheduling contract); verify its example runs
 
 ## 6. Alpha Extraction & Public Example
 

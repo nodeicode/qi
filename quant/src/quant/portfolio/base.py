@@ -21,6 +21,22 @@ from typing import Any
 
 from quant.instruments.base import Instrument
 
+# Keys whose values the Position lifecycle recomputes/owns; everything else in a
+# canonical PositionDict round-trips verbatim through ``from_position_dict`` ->
+# ``to_position_dict`` (see Position).
+_CANONICAL_MANAGED_KEYS = frozenset(
+    {
+        "EntryPrice",
+        "Direction",
+        "Qty",
+        "_state",
+        "_signed_qty",
+        "_avg_price",
+        "_cost_basis",
+        "_realized_pnl",
+    }
+)
+
 
 class Side(StrEnum):
     """Fill direction relative to the instrument (BUY adds to the long side)."""
@@ -121,6 +137,10 @@ class Position:
         self.avg_price = float(opening_fill.price)
         self.cost_basis = abs(self.signed_qty) * self.avg_price
         self._realized = 0.0
+        # Canonical-schema extras preserved verbatim across a dictionary
+        # round-trip (see ``to_position_dict`` / ``from_position_dict``): the
+        # engine path and the Portfolio primitive share one representation.
+        self._extras: dict[str, Any] = {}
 
     # ── PositionDict-compat aliases (legacy schema names kept) ────────────
     @property
@@ -226,6 +246,11 @@ class Position:
             "_cost_basis": self.cost_basis,
             "_realized_pnl": self.realized_pnl,
         }
+        # Re-emit any canonical-schema extras captured by ``from_position_dict``
+        # (StopLoss/TakeProfit/UseTrail/MaxHoldTime/strategy extras, ...) so a
+        # round-trip reproduces the original request verbatim (plus the Qi
+        # lifecycle bookkeeping keys above). Fills-built positions have none.
+        d.update(self._extras)
         return d
 
     def to_dict(self) -> dict[str, Any]:
@@ -234,36 +259,48 @@ class Position:
 
     @staticmethod
     def from_position_dict(d: dict[str, Any]) -> Position:
-        """Rebuild a position from its :meth:`to_position_dict` representation.
+        """Rebuild a position from a canonical ``PositionDict`` representation.
 
-        Reconstructs the *internal* state exactly (signed quantity, weighted
-        average price, partial realized PnL) so a snapshot round-trips without
-        re-deriving it from fills.
+        Tolerates partial records (``Venue``/``Ticker``/``Qty`` optional — a
+        backtest request may carry no venue/qty yet), reconstructs the internal
+        state exactly from the Qi lifecycle keys, and preserves every
+        canonical-schema extra verbatim so :meth:`to_position_dict` round-trips
+        the request losslessly (the engine path and the Portfolio primitive
+        share one position representation).
         """
+        direction = int(d.get("Direction", 1))
+        signed = d.get("_signed_qty")
+        if signed is not None:
+            magnitude = abs(float(signed))
+        else:
+            magnitude = abs(float(d.get("Qty", 0.0)))
         pos = Position(
             Fill(
-                venue=str(d["Venue"]),
-                symbol=str(d["Ticker"]),
-                side=Side.BUY if int(d["Direction"]) >= 0 else Side.SELL,
-                qty=abs(float(d["Qty"])),
-                price=float(d["EntryPrice"]),
+                venue=str(d.get("Venue", "")),
+                symbol=str(d.get("Ticker", "")),
+                side=Side.BUY
+                if (signed is not None and float(signed) >= 0) or direction >= 0
+                else Side.SELL,
+                qty=magnitude,
+                price=float(d.get("EntryPrice", 0.0)),
                 strategy=d.get("Strategy"),
                 timestamp=d.get("EntryTime"),
             ),
             signal=str(d.get("Signal", "BUY")),
             confidence=float(d.get("Confidence", 0.0)),
         )
-        if "_signed_qty" in d:
-            pos.signed_qty = float(d["_signed_qty"])
+        if signed is not None:
+            pos.signed_qty = float(signed)
         if "_avg_price" in d:
             pos.avg_price = float(d["_avg_price"])
         if "_realized_pnl" in d:
             pos._realized = float(d["_realized_pnl"])
         pos.cost_basis = abs(pos.signed_qty) * pos.avg_price
         pos.state = PositionState(str(d.get("_state", PositionState.OPENED.value)))
-        pos.entry_price = float(d["EntryPrice"])
+        pos.entry_price = float(d.get("EntryPrice", pos.entry_price))
         if d.get("OrderId"):
             pos.order_ids = [str(d["OrderId"])]
+        pos._extras = {k: v for k, v in d.items() if k not in _CANONICAL_MANAGED_KEYS}
         return pos
 
     # ── Snapshot (live persistence / recovery) ───────────────────────────
