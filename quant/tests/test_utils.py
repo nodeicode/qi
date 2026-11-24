@@ -27,7 +27,6 @@ from quant.core._utils import (
     select_signal_row,
 )
 from quant.core.protocols import PositionDict
-from quant.utils.options import check_ic_credit_gates, check_ic_spread_gate
 from quant.utils.time import (
     _interval_floor_freq,
     _interval_timedelta,
@@ -329,40 +328,6 @@ class TestSelectSignalRow:
         signal, confidence, _ = selected
         assert signal == "BUY"
         assert confidence == 0.9
-
-
-# ========================================================================
-# IC credit / spread gates — full branch matrix
-# ========================================================================
-
-
-class TestIcGates:
-    def test_credit_gate_too_low(self):
-        assert check_ic_credit_gates(1.0, min_credit=2.0) == "credit_too_low"
-
-    def test_credit_gate_too_high(self):
-        assert check_ic_credit_gates(6.0, max_credit=5.0) == "credit_too_high"
-
-    def test_credit_gate_inf_max_is_off(self):
-        assert check_ic_credit_gates(6.0, max_credit=float("inf")) is None
-
-    def test_credit_gate_passes(self):
-        assert check_ic_credit_gates(3.0, min_credit=1.0, max_credit=5.0) is None
-
-    def test_spread_gate_disabled_when_cap_nonpositive(self):
-        assert check_ic_spread_gate(10.0, 1.0, 0.0) is None
-
-    def test_spread_gate_skips_nonpositive_spread(self):
-        assert check_ic_spread_gate(10.0, 0.0, 0.5) is None
-
-    def test_spread_gate_nonpositive_credit(self):
-        assert check_ic_spread_gate(-1.0, 1.0, 0.5) == "spread_too_wide"
-
-    def test_spread_gate_width_exceeds_cap(self):
-        assert check_ic_spread_gate(5.0, 4.0, 0.5) == "spread_too_wide"
-
-    def test_spread_gate_passes(self):
-        assert check_ic_spread_gate(100.0, 10.0, 0.5) is None
 
 
 # ========================================================================

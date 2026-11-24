@@ -13,7 +13,7 @@ import time
 
 import pytest
 
-from quant.core.monitor_utils import (
+from quant.observability import (
     SLO_SPAN_KEYS,
     SPAN_KEYS,
     Span,

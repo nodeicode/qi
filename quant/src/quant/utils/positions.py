@@ -17,20 +17,20 @@ class PositionDict(TypedDict, total=False):
 
     Contains **only** the universal contract fields every position type uses.
     Strategy/options-specific extras (IC strikes, direction, metrics) are
-    passed through via ``**extra`` in ``build_position_dict`` /
-    ``build_ic_position`` — parity requires the data travel, not that this
-    type know about it.
+    passed through via ``**extra`` in ``build_position_dict`` — parity
+    requires the data travel, not that this type know about it.
 
-    The IC strike/direction bundle is declared once as the **shared typed
-    envelope** ``quant.utils.options.ICMeta`` and validated at record
-    boundaries via ``is_ic_position`` / ``is_live_ic_position`` before
-    cross-cutting code reads it (never ``cast``, never ``dict.get(..., 0)``).
+    The IC strike/direction bundle used to be declared once as a shared typed
+    envelope (``quant.utils.options.ICMeta``, removed with the equity-only
+    trim); the validator ``is_ic_position`` now lives in
+    ``quant.core._utils``. Cross-cutting code reads IC fields only after that
+    boundary check (never ``cast``, never ``dict.get(..., 0)``).
 
     The only sanctioned ``*PositionDict`` subclass is the live layer's
-    ``LivePositionDict`` (``python/protocols.py``): it extends the shared
+    ``LivePositionDict`` (``quant.live.protocols``): it extends the shared
     contract with live-only execution/broker fields and is guarded at entry by
     ``is_live_ic_position``. Do not add further subclasses; strategy fields
-    belong in ``ICMeta`` or a strategy-local store, not on this dict.
+    belong in a strategy-local store, not on this dict.
     """
 
     # ── Universal fields (every position) ──

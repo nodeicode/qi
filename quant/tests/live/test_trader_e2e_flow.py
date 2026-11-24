@@ -71,7 +71,7 @@ class DummyStrategy(LiveStrategyProtocol):
 
         if "SMA" in df.columns:
             buy = df["Close"] > df["SMA"]
-            out.loc[buy, "Signal"] = "BUY_CALL"
+            out.loc[buy, "Signal"] = "BUY"
             out.loc[buy, "Confidence"] = 1.0
             out.loc[buy, "Reason"] = "Close > SMA"
 
@@ -91,6 +91,8 @@ class TestUnifiedTraderE2E(unittest.TestCase):
     def setUp(self):
         self.mock_data_handler = MagicMock()
         self.mock_client = MagicMock()
+        # Real buy power so the equity sizing path can place orders.
+        self.mock_client.get_account.return_value.equity = "100000.0"
 
         self.mock_data_handler.fetch_real_time_option_data.return_value = pd.DataFrame()
         self.mock_data_handler.clients = {
@@ -150,10 +152,7 @@ class TestUnifiedTraderE2E(unittest.TestCase):
         pos = trader.active_positions["DummyStrategy_paper"][0]
         self.assertEqual(pos["Ticker"], "SPY")
 
-        # Monitor: real sidecar is stubbed; emit still records signal_evaluated.
-        from quant.live.monitor.emit import start_sidecar
-
-        start_sidecar.assert_called_once()
+        # Monitor: emit hook is stubbed; emit still records signal_evaluated.
         self.assertIsNotNone(trader._monitor_emit)
         sig_events = [
             call.args[0]
@@ -165,7 +164,7 @@ class TestUnifiedTraderE2E(unittest.TestCase):
         self.assertEqual(len(sig_events), 1)
         self.assertEqual(sig_events[0]["ticker"], "SPY")
         self.assertEqual(sig_events[0]["strategy_name"], "DummyStrategy_paper")
-        self.assertIn(sig_events[0]["live_signal"], {"BUY_CALL", "HOLD"})
+        self.assertIn(sig_events[0]["live_signal"], {"BUY", "HOLD"})
         self.assertIn("generate_signals_ns", sig_events[0])
 
     @patch("quant.live.trader.load_state", return_value={})

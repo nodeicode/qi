@@ -652,20 +652,14 @@ class TestTraderRun(unittest.TestCase):
 
 
 # ===========================================================================
-# Monitor wiring (sidecar stubbed via conftest.mock_monitor)
+# Monitor wiring (emit hook stubbed via conftest.mock_monitor)
 # ===========================================================================
 
 
 def test_trader_starts_monitor_and_wires_emit(mock_monitor):
-    """UnifiedTrader starts the (stubbed) sidecar and injects emit into engines."""
-    from quant.live.monitor.emit import start_sidecar
-
+    """UnifiedTrader wires the optional emit hook into engines (no sidecar)."""
     trader = _make_trader("CoreStrategy_paper")
 
-    start_sidecar.assert_called_once_with(
-        metrics_path="monitor_metrics.jsonl",
-        state_path="monitor_sidecar_state.json",
-    )
     assert trader._monitor_enabled is True
     assert trader._monitor_emit is mock_monitor
     engine = trader.engines["CoreStrategy_paper"]
@@ -694,7 +688,7 @@ def test_trader_run_emits_heartbeat(mock_monitor):
     assert isinstance(heartbeats[0].get("main_loop_lag_ns"), int)
 
     # Worker wrapper publishes dispatch jitter to the monitor plane.
-    from quant.core.monitor_utils import tick_dispatch_ns
+    from quant.core._utils import tick_dispatch_ns
 
     captured: dict[str, int] = {}
     trader_inst = _make_trader("CoreStrategy_paper")

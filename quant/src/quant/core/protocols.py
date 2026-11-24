@@ -3,7 +3,6 @@ from typing import Any, Protocol, runtime_checkable
 
 import pandas as pd
 
-from quant.utils.options import ICMeta as ICMeta
 from quant.utils.positions import PositionDict
 from quant.utils.strategy_config import BaseStrategyConfig
 

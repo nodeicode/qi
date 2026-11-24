@@ -8,7 +8,6 @@ import pandas as pd
 import scipy.stats as ss
 from numba import njit
 
-from quant.utils.options import calc_spread_width, select_strike
 from quant.utils.strategy_config import BaseStrategyConfig
 from quant.utils.time import _INTRADAY_HOUR, _INTRADAY_MINUTE, calculate_entry_time
 
@@ -381,33 +380,6 @@ def display_results_table(results_dict, title="Performance Metrics"):
 
     except (ImportError, Exception):  # noqa: S110
         pass  # Text output already emitted via logger above
-
-
-def build_spread_strikes(
-    config: BaseStrategyConfig,
-    underlying_price: float,
-    opt_type: str,
-    is_credit: bool = False,
-):
-    long_strike = select_strike(underlying_price, opt_type, config)
-    width = calc_spread_width(underlying_price, config)
-    if not is_credit:
-        if opt_type == "call":
-            short_strike = long_strike + width
-            label = "CallDebit"
-        else:
-            short_strike = long_strike - width
-            label = "PutDebit"
-    else:
-        if opt_type == "call":
-            short_strike = long_strike
-            long_strike = short_strike + width
-            label = "CallCredit"
-        else:
-            short_strike = long_strike
-            long_strike = short_strike - width
-            label = "PutCredit"
-    return float(long_strike), float(short_strike), width, label
 
 
 def apply_breach_exit_cbbo(

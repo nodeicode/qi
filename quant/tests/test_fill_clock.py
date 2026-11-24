@@ -10,8 +10,7 @@ import pandas as pd
 
 from quant.backtest.executors import BacktestExecContext, ExecutorRouter
 from quant.backtest.utils import calculate_fill_time
-from quant.utils.ic_scheduling import et_wall_to_utc_naive
-from quant.utils.time import calculate_entry_time
+from quant.utils.time import calculate_entry_time, et_wall_to_utc_naive
 
 
 def _router(cfg) -> ExecutorRouter:

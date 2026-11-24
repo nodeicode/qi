@@ -7,8 +7,6 @@ are lightweight fakes built from SimpleNamespace / dataclasses.
 Covers:
   - SignalType enum members and StrEnum behaviour
   - signal_asset_class / signal_direction mapping
-  - select_strike (ATM / ITM / OTM for calls and puts)
-  - calc_spread_width (adaptive and config override)
   - check_entry_gate (actionable, confidence, concurrency)
   - build_position_dict schema and extras
   - inject_indicators (merge_asof, daily shift, no-indicator fallback)
@@ -25,7 +23,7 @@ Covers:
   - TradingEngine.process_ticker signal HOLD reason logged / suppressed
   - TradingEngine.process_ticker actionable signal reason included in log
   - TradingEngine.size_for_signal (registry sizing dispatch)
-  - TradingEngine.build_position / build_ic_position
+  - TradingEngine.build_position
 """
 
 from __future__ import annotations
@@ -51,24 +49,21 @@ from quant.core._utils import (
     SignalRegistry,
     SignalType,
     _to_utc_naive_us,
+    bar_staleness_ns,
     call_manage_trade,
     check_entry_gate,
     fetch_data,
     fetch_manage_data,
     inject_indicators,
+    resolve_data_delay_min,
     signal_asset_class,
     signal_direction,
-)
-from quant.core.engine import TradingEngine
-from quant.core.monitor_utils import (
-    bar_staleness_ns,
-    resolve_data_delay_min,
     snapshot_config,
     staleness_excess_ns,
 )
+from quant.core.engine import TradingEngine
 from quant.core.protocols import PositionDict
 from quant.core.sizing import size_for_signal
-from quant.utils.options import build_ic_position, calc_spread_width, select_strike
 from quant.utils.positions import build_position_dict
 from quant.utils.strategy_config import BaseStrategyConfig
 from quant.utils.time import (
@@ -512,93 +507,6 @@ class TestSessionClocks:
 
 
 # ========================================================================
-# 3. select_strike
-# ========================================================================
-
-
-class TestSelectStrike:
-    def test_atm_rounds_to_increment(self):
-        cfg = _make_config(OPTION_STRIKE_METHOD="atm", OPTION_STRIKE_INCREMENT=5.0)
-        assert select_strike(102.0, "call", cfg) == 100.0
-        assert select_strike(103.0, "put", cfg) == 105.0
-
-    def test_itm_call(self):
-        cfg = _make_config(
-            OPTION_STRIKE_METHOD="itm",
-            OPTION_STRIKE_INCREMENT=5.0,
-            OPTION_ITM_DEPTH=0.05,
-        )
-        # Call ITM = strike BELOW underlying
-        strike = select_strike(100.0, "call", cfg)
-        assert strike <= 100.0
-
-    def test_itm_put(self):
-        cfg = _make_config(
-            OPTION_STRIKE_METHOD="itm",
-            OPTION_STRIKE_INCREMENT=5.0,
-            OPTION_ITM_DEPTH=0.05,
-        )
-        # Put ITM = strike ABOVE underlying
-        strike = select_strike(100.0, "put", cfg)
-        assert strike >= 100.0
-
-    def test_otm_call(self):
-        cfg = _make_config(
-            OPTION_STRIKE_METHOD="otm",
-            OPTION_STRIKE_INCREMENT=5.0,
-            OPTION_OTM_DEPTH=0.05,
-        )
-        # Call OTM = strike ABOVE underlying
-        strike = select_strike(100.0, "call", cfg)
-        assert strike >= 100.0
-
-    def test_otm_put(self):
-        cfg = _make_config(
-            OPTION_STRIKE_METHOD="otm",
-            OPTION_STRIKE_INCREMENT=5.0,
-            OPTION_OTM_DEPTH=0.05,
-        )
-        # Put OTM = strike BELOW underlying
-        strike = select_strike(100.0, "put", cfg)
-        assert strike <= 100.0
-
-    def test_returns_float(self):
-        cfg = _make_config()
-        assert isinstance(select_strike(100.0, "call", cfg), float)
-
-
-# ========================================================================
-# 4. calc_spread_width
-# ========================================================================
-
-
-class TestCalcSpreadWidth:
-    def test_config_override(self):
-        cfg = _make_config(MIN_SPREAD_WIDTH=7.5)
-        assert calc_spread_width(500.0, cfg) == 7.5
-
-    def test_adaptive_small(self):
-        cfg = _make_config()  # MIN_SPREAD_WIDTH defaults to None
-        assert calc_spread_width(150.0, cfg) == 5.0
-
-    def test_adaptive_medium(self):
-        cfg = _make_config()
-        assert calc_spread_width(500.0, cfg) == 10.0
-
-    def test_adaptive_large(self):
-        cfg = _make_config()
-        assert calc_spread_width(1500.0, cfg) == 20.0
-
-    def test_boundary_200(self):
-        cfg = _make_config()
-        assert calc_spread_width(200.0, cfg) == 5.0
-
-    def test_boundary_1000(self):
-        cfg = _make_config()
-        assert calc_spread_width(1000.0, cfg) == 10.0
-
-
-# ========================================================================
 # 5. check_entry_gate
 # ========================================================================
 
@@ -679,21 +587,6 @@ class TestBuildPositionDict:
 
 
 class TestPositionDictSubclass:
-    def test_icmeta_defines_custom_fields(self):
-        """The shared ``ICMeta`` envelope exposes the IC-typed fields — IC
-        typing comes from one shared declaration, not a local subclass."""
-        from quant.core.protocols import ICMeta
-
-        pos: ICMeta = {
-            "K_LP": 400.0,
-            "K_SP": 410.0,
-            "K_SC": 430.0,
-            "K_LC": 440.0,
-            "IC_Direction": 1,
-        }
-        assert pos["K_LP"] == 400.0
-        assert pos["IC_Direction"] == 1
-
     def test_subclass_compatible_with_build_position_dict(self):
         """build_position_dict output satisfies PositionDict base + extras."""
         cfg = _make_config()
@@ -1326,7 +1219,7 @@ class TestSizing:
 
 
 # ========================================================================
-# 17. build_position / build_ic_position
+# 17. build_position
 # ========================================================================
 
 
@@ -1343,114 +1236,6 @@ class TestBuildPosition:
     def test_extras_passed_through(self, engine):
         pos = engine.build_position(None, 50.0, -1, "SELL", 0.5, Ticker="AAPL")
         assert pos["Ticker"] == "AAPL"
-
-
-class TestBuildICPosition:
-    def test_ic_fields(self, engine):
-        strikes = {"K_LP": 400.0, "K_SP": 410.0, "K_SC": 430.0, "K_LC": 440.0}
-        pos = cast(
-            "dict[str, Any]",
-            build_ic_position(
-                None,
-                420.0,
-                1,
-                "SELL_IC",
-                0.7,
-                strikes,
-                engine.strategy.config,
-                atr=5.0,
-            ),
-        )
-        assert pos["AssetType"] == "IC"
-        assert pos["IC_Direction"] == 1
-        assert pos["K_LP"] == 400.0
-        assert pos["K_SC"] == 430.0
-        assert pos["ATR"] == 5.0
-        assert pos["UnderlyingEntryPrice"] == 420.0
-
-    def test_ic_extra_kwargs(self, engine):
-        pos = build_ic_position(
-            None,
-            420.0,
-            1,
-            "SELL_IC",
-            0.7,
-            {},
-            engine.strategy.config,
-            Expiration="2024-06-21",
-        )
-        assert pos["Expiration"] == "2024-06-21"
-
-    def test_icmeta_declares_forwarded_keys(self, engine):
-        """Every key declared by the shared ICMeta envelope is forwarded onto
-        the position record by ``build_ic_position``."""
-        from quant.core.protocols import ICMeta
-
-        pos = build_ic_position(
-            None,
-            420.0,
-            1,
-            "SELL_IC",
-            0.7,
-            {"K_LP": 400.0, "K_SP": 410.0, "K_SC": 430.0, "K_LC": 440.0},
-            engine.strategy.config,
-        )
-        for key in ICMeta.__annotations__:
-            assert key in pos, (
-                f"{key} declared by ICMeta not forwarded by build_ic_position"
-            )
-
-    def test_icmeta_roundtrip_opacity(self, engine):
-        """IC extra keys survive a JSON serialize/reload round-trip and the
-        reloaded record still passes the boundary guard (R4 invariant)."""
-        import json as _json
-
-        from quant.utils.options import is_ic_position
-
-        pos = build_ic_position(
-            None,
-            420.0,
-            1,
-            "SELL_IC",
-            0.7,
-            {"K_LP": 400.0, "K_SP": 410.0, "K_SC": 430.0, "K_LC": 440.0},
-            engine.strategy.config,
-            atr=5.0,
-            Expiration="2024-06-21",
-        )
-        reloaded = _json.loads(_json.dumps(pos))
-        assert reloaded["K_LP"] == 400.0
-        assert reloaded["Expiration"] == "2024-06-21"
-        assert is_ic_position(reloaded)
-
-    def test_is_ic_position_typeguard(self):
-        """The boundary lift accepts a complete numeric IC bundle and rejects
-        partial or malformed records (never ``cast``)."""
-        from quant.utils.options import is_ic_position
-
-        assert is_ic_position(
-            {
-                "K_LP": 400.0,
-                "K_SP": 410.0,
-                "K_SC": 430.0,
-                "K_LC": 440.0,
-                "IC_Direction": 1,
-            }
-        )
-        # missing one required strike -> reject
-        assert not is_ic_position(
-            {"K_SP": 410.0, "K_SC": 430.0, "K_LC": 440.0, "IC_Direction": 1}
-        )
-        # non-numeric strike -> reject
-        assert not is_ic_position(
-            {
-                "K_LP": "400",
-                "K_SP": 410.0,
-                "K_SC": 430.0,
-                "K_LC": 440.0,
-                "IC_Direction": 1,
-            }
-        )
 
 
 # ========================================================================
@@ -2219,7 +2004,7 @@ class TestProcessStrategy:
         def boom(_config):
             raise RuntimeError("config snapshot exploded")
 
-        monkeypatch.setattr("quant.core.monitor_utils.snapshot_config", boom)
+        monkeypatch.setattr("quant.core._utils.snapshot_config", boom)
         engine = _make_engine(
             cfg, s, _make_data_handler(), monitor_emit=lambda _e: None
         )

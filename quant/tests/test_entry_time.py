@@ -6,8 +6,7 @@ import zoneinfo
 
 import pandas as pd
 
-from quant.utils.ic_scheduling import et_wall_to_utc_naive
-from quant.utils.time import calculate_entry_time
+from quant.utils.time import calculate_entry_time, et_wall_to_utc_naive
 
 _ET = zoneinfo.ZoneInfo("America/New_York")
 

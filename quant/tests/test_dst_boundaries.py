@@ -3,7 +3,7 @@
 Guards the end-to-end invariant: an entry/signal wall at a fixed ET time
 must map to the correct naive-UTC stamp across the US DST boundary.
 
-* ``ic_scheduling.et_wall_to_utc_naive`` — pure ET-wall → naive-UTC mapping
+* ``utils.time.et_wall_to_utc_naive`` — pure ET-wall → naive-UTC mapping
   (10:15 ET → 14:15 UTC EDT / 15:15 UTC EST).
 * ``backtest.utils.calculate_fill_time`` — the backtest fill clock
   (``T + I + DATA_DELAY``) on the 09:45 ET signal bar → 10:15 ET fill:
@@ -18,7 +18,7 @@ import pandas as pd
 import pytest
 
 from quant.backtest.utils import calculate_fill_time
-from quant.utils.ic_scheduling import et_wall_to_utc_naive
+from quant.utils.time import et_wall_to_utc_naive
 
 # US DST boundaries in 2023: starts Mar 12 02:00, ends Nov 05 02:00.
 _EST_DATE = datetime.date(2023, 1, 10)

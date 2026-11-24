@@ -17,9 +17,31 @@ from typing import ClassVar, Literal, Protocol, overload
 
 import pandas as pd
 
-from quant.utils.ic_scheduling import et_wall_to_utc_naive
-
 _ET = zoneinfo.ZoneInfo("America/New_York")
+
+
+def et_wall_to_utc_naive(
+    entry_date: datetime.date,
+    hour: int,
+    minute: int = 0,
+) -> pd.Timestamp:
+    """Convert an ET wall clock on *entry_date* to UTC-naive (DST-safe).
+
+    Naive output means **UTC wall clock**, never ET.  Summer/winter offsets
+    come from ``America/New_York`` (e.g. 10:00 ET → 14:00 UTC EDT, 15:00 UTC EST).
+    """
+    ts_et = pd.Timestamp(
+        year=entry_date.year,
+        month=entry_date.month,
+        day=entry_date.day,
+        hour=int(hour),
+        minute=int(minute),
+        second=0,
+        tz=_ET,
+    )
+    return ts_et.tz_convert("UTC").tz_localize(None)
+
+
 _DAILY_INTERVALS = frozenset({"1d", "1wk", "1mo"})
 
 _INTRADAY_MINUTE = ("1m", "5m", "15m", "30m", "60m")

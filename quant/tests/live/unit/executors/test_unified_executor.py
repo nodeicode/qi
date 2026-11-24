@@ -5,16 +5,12 @@ All Alpaca API calls are mocked — no network calls.
 
 Covers:
   - __init__: dict clients stored; single non-dict client wrapped as {'default': client}
-  - set_client: updates self.client, ic_executor.client, and equity_mgr.set_active
-  - enter_trade: SELL_IC / BUY_IC → delegates to IronCondorExecutor.enter
-  - enter_trade: BUY_CALL / BUY_PUT → delegates to _enter_option_trade
-  - enter_trade: BUY_CALL_SPREAD → logs warning, returns None
-  - enter_trade: BUY / SELL → delegates to _enter_linear_trade
+  - set_client: updates self.client and equity_mgr.set_active
+  - enter_trade: EQUITY BUY / SELL → delegates to _enter_linear_trade
+  - enter_trade: IC / OPTION / SPREAD signals → skip warning, returns None
   - enter_trade: exception in routing → returns None (never raises)
-  - exit_trade: IC asset type → delegates to IronCondorExecutor.exit
   - exit_trade: no symbol in position dict → returns False
   - exit_trade: EQUITY close → submits order, credits equity, returns True
-  - exit_trade: OPTION close → credits equity with x100 multiplier
   - exit_trade: broker exception → returns False
   - _enter_linear_trade: entry_price = 0 → returns None
   - _enter_linear_trade: qty < 1 → returns None
@@ -54,11 +50,9 @@ def _make_executor(equity: float = 50000.0) -> UnifiedExecutor:
         data_handler=MagicMock(),
         logger=_logger,
     )
-    # Swap out IC executor and equity manager with plain mocks
-    executor.ic_executor = MagicMock()
+    # Swap out the equity manager with a plain mock
     executor.equity_mgr = MagicMock()
     executor.equity_mgr.get.return_value = equity
-    executor.option_data_handler = MagicMock()
     return executor
 
 
@@ -130,11 +124,6 @@ def _make_strategy(
     return s
 
 
-def _ic_mock(ex: UnifiedExecutor) -> MagicMock:
-    """Cast ic_executor to MagicMock for type-safe mock setup in tests."""
-    return cast("MagicMock", ex.ic_executor)
-
-
 def _client_mock(ex: UnifiedExecutor) -> MagicMock:
     """Cast ex.client to MagicMock for type-safe mock setup in tests."""
     return cast("MagicMock", ex.client)
@@ -161,15 +150,6 @@ class TestUnifiedExecutorInit:
         )
 
         assert ex.client is mock_client
-
-    def test_ic_executor_created(self) -> None:
-        ex = UnifiedExecutor(
-            clients={"paper": MagicMock()},
-            data_handler=MagicMock(),
-            logger=_logger,
-        )
-
-        assert ex.ic_executor is not None
 
     def test_equity_mgr_created(self) -> None:
         mock_client = MagicMock()
@@ -198,7 +178,6 @@ class TestSetClient:
         ex.set_client("prod", new_client)
 
         assert ex.client is new_client
-        assert ex.ic_executor.client is new_client
         ex.equity_mgr.set_active.assert_called_once_with("prod")
 
     def test_set_client_can_be_called_multiple_times(self) -> None:
@@ -212,14 +191,12 @@ class TestSetClient:
     def test_set_client_does_not_update_clients_when_set_active_fails(self) -> None:
         ex = _make_executor()
         original_client = ex.client
-        original_ic_client = ex.ic_executor.client
         ex.equity_mgr.set_active.return_value = False
 
         result = ex.set_client("unknown", MagicMock())
 
         assert result is False
         assert ex.client is original_client
-        assert ex.ic_executor.client is original_ic_client
 
 
 # ===========================================================================
@@ -228,11 +205,9 @@ class TestSetClient:
 
 
 class TestEnterTradeRouting:
-    def test_sell_ic_signal_delegates_to_ic_executor(self) -> None:
+    def test_ic_signal_skipped_with_warning(self) -> None:
         ex = _make_executor()
         strategy = _make_strategy()
-        fake_pos = MagicMock()
-        _ic_mock(ex).enter.return_value = fake_pos
 
         result = ex.enter_trade(
             strategy,
@@ -241,19 +216,23 @@ class TestEnterTradeRouting:
             engine=_make_engine(),
         )
 
-        ex.ic_executor.enter.assert_called_once()
-        assert result is fake_pos
+        assert result is None
+        ex.client.submit_order.assert_not_called()
 
-    def test_buy_ic_signal_delegates_to_ic_executor(self) -> None:
+    def test_option_signal_skipped_with_warning(self) -> None:
         ex = _make_executor()
         strategy = _make_strategy()
-        _ic_mock(ex).enter.return_value = None
 
-        ex.enter_trade(
-            strategy, "SPY", {"Signal": "BUY_IC", "Close": 450.0}, engine=_make_engine()
-        )
+        with patch.object(ex, "_enter_linear_trade") as mock_lin:
+            result = ex.enter_trade(
+                strategy,
+                "SPY",
+                {"Signal": "BUY_CALL", "Close": 450.0},
+                engine=_make_engine(),
+            )
 
-        ex.ic_executor.enter.assert_called_once()
+        assert result is None
+        mock_lin.assert_not_called()
 
     def test_spread_signal_returns_none_with_no_order(self) -> None:
         ex = _make_executor()
@@ -302,59 +281,19 @@ class TestEnterTradeRouting:
 
         mock_lin.assert_called_once()
 
-    def test_call_option_signal_delegates_to_option_trade(self) -> None:
-        ex = _make_executor()
-        strategy = _make_strategy()
-
-        with patch.object(ex, "_enter_option_trade", return_value=None) as mock_opt:
-            ex.enter_trade(
-                strategy,
-                "SPY",
-                {"Signal": "BUY_CALL", "Close": 450.0},
-                engine=_make_engine(),
-            )
-
-        mock_opt.assert_called_once()
-
-    def test_put_option_signal_delegates_to_option_trade(self) -> None:
-        ex = _make_executor()
-        strategy = _make_strategy()
-
-        with patch.object(ex, "_enter_option_trade", return_value=None) as mock_opt:
-            ex.enter_trade(
-                strategy,
-                "SPY",
-                {"Signal": "BUY_PUT", "Close": 450.0},
-                engine=_make_engine(),
-            )
-
-        mock_opt.assert_called_once()
-
     def test_exception_in_routing_returns_none(self) -> None:
         ex = _make_executor()
         strategy = _make_strategy()
-        _ic_mock(ex).enter.side_effect = Exception("broker crash")
 
-        result = ex.enter_trade(
-            strategy,
-            "SPY",
-            {"Signal": "SELL_IC", "Close": 450.0},
-            engine=_make_engine(),
-        )
-
-        assert result is None
-
-    def test_ic_executor_returns_none_propagated(self) -> None:
-        ex = _make_executor()
-        strategy = _make_strategy()
-        _ic_mock(ex).enter.return_value = None
-
-        result = ex.enter_trade(
-            strategy,
-            "SPY",
-            {"Signal": "SELL_IC", "Close": 450.0},
-            engine=_make_engine(),
-        )
+        with patch.object(
+            ex, "_enter_linear_trade", side_effect=Exception("broker crash")
+        ):
+            result = ex.enter_trade(
+                strategy,
+                "SPY",
+                {"Signal": "BUY", "Close": 450.0},
+                engine=_make_engine(),
+            )
 
         assert result is None
 
@@ -365,23 +304,6 @@ class TestEnterTradeRouting:
 
 
 class TestExitTrade:
-    def test_ic_position_delegates_to_ic_executor(self) -> None:
-        ex = _make_executor()
-        _ic_mock(ex).exit.return_value = True
-        pos = cast("LivePositionDict", {"AssetType": "IC", "Ticker": "SPY"})
-
-        result = ex.exit_trade(pos, qty=1)
-
-        ex.ic_executor.exit.assert_called_once_with(pos, 1)
-        assert result is True
-
-    def test_ic_position_failure_propagated(self) -> None:
-        ex = _make_executor()
-        _ic_mock(ex).exit.return_value = False
-        pos = cast("LivePositionDict", {"AssetType": "IC", "Ticker": "SPY"})
-
-        assert ex.exit_trade(pos, qty=1) is False
-
     def test_missing_symbol_returns_false(self) -> None:
         ex = _make_executor()
         pos = cast(
@@ -418,22 +340,6 @@ class TestExitTrade:
 
         ex.equity_mgr.credit.assert_called_once_with(10 * 100.0)
 
-    def test_option_exit_credits_with_100x_multiplier(self) -> None:
-        ex = _make_executor()
-        _client_mock(ex).submit_order.return_value = _make_order()
-        pos = cast(
-            "LivePositionDict",
-            {
-                "AssetType": "OPTION",
-                "OccSymbol": "SPY250321C00450000",
-                "EntryPrice": 2.50,
-            },
-        )
-
-        ex.exit_trade(pos, qty=1)
-
-        ex.equity_mgr.credit.assert_called_once_with(1 * 2.50 * 100)
-
     def test_exit_uses_occ_symbol_when_present(self) -> None:
         import quant.live.executors.unified_executor as _ue_mod
 
@@ -442,7 +348,12 @@ class TestExitTrade:
         occ = "SPY250321C00450000"
         pos = cast(
             "LivePositionDict",
-            {"AssetType": "OPTION", "OccSymbol": occ, "EntryPrice": 2.0},
+            {
+                "AssetType": "EQUITY",
+                "OccSymbol": occ,
+                "Ticker": "SPY",
+                "EntryPrice": 2.0,
+            },
         )
 
         with patch.object(_ue_mod, "MarketOrderRequest") as mock_mor:
@@ -645,242 +556,6 @@ class TestEnterLinearTrade:
 
 
 # ===========================================================================
-# enter_trade — fallback routing (engine=_make_engine(), unknown signal)
-# ===========================================================================
-
-
-class TestEnterTradeFallbackRouting:
-    """Covers the else-branch at lines ~114-123 in unified_executor.py where signal
-    is not in any known set and routing falls back to ASSET_CLASS + MIN_OPTION_DTE."""
-
-    def test_unknown_signal_with_min_option_dte_routes_to_option(self) -> None:
-        """ASSET_CLASS=EQUITY + MIN_OPTION_DTE=7 (not None/-1) → OPTION path."""
-        ex = _make_executor(equity=50_000.0)
-        strategy = _make_strategy()
-        strategy.config.ASSET_CLASS = "EQUITY"
-        strategy.config.MIN_OPTION_DTE = 7
-
-        expected_pos = {"Ticker": "SPY", "AssetType": "OPTION"}
-
-        with patch.object(
-            ex, "_enter_option_trade", return_value=expected_pos
-        ) as mock_opt:
-            result = ex.enter_trade(
-                strategy,
-                "SPY",
-                {"Signal": "CUSTOM_SIGNAL", "Close": 450.0},
-                engine=_make_engine(route="OPTION"),
-            )
-
-        mock_opt.assert_called_once()
-        assert result is expected_pos
-
-    def test_unknown_signal_min_option_dte_none_stays_equity(self) -> None:
-        """MIN_OPTION_DTE=None → stays EQUITY."""
-        ex = _make_executor(equity=50_000.0)
-        strategy = _make_strategy()
-        strategy.config.ASSET_CLASS = "EQUITY"
-        strategy.config.MIN_OPTION_DTE = None
-
-        expected_pos = {"Ticker": "SPY", "AssetType": "EQUITY"}
-
-        with (
-            patch.object(
-                ex, "_enter_linear_trade", return_value=expected_pos
-            ) as mock_lin,
-            patch.object(ex, "_enter_option_trade") as mock_opt,
-        ):
-            result = ex.enter_trade(
-                strategy,
-                "SPY",
-                {"Signal": "CUSTOM_SIGNAL", "Close": 450.0},
-                engine=_make_engine(),
-            )
-
-        mock_opt.assert_not_called()
-        mock_lin.assert_called_once()
-        assert result is expected_pos
-
-    def test_unknown_signal_min_option_dte_minus1_stays_equity(self) -> None:
-        """MIN_OPTION_DTE=-1 (disable option routing) → stays EQUITY."""
-        ex = _make_executor(equity=50_000.0)
-        strategy = _make_strategy()
-        strategy.config.ASSET_CLASS = "EQUITY"
-        strategy.config.MIN_OPTION_DTE = -1
-
-        with (
-            patch.object(ex, "_enter_linear_trade", return_value=None) as mock_lin,
-            patch.object(ex, "_enter_option_trade") as mock_opt,
-        ):
-            ex.enter_trade(
-                strategy,
-                "SPY",
-                {"Signal": "CUSTOM_SIGNAL", "Close": 450.0},
-                engine=_make_engine(),
-            )
-
-        mock_opt.assert_not_called()
-        mock_lin.assert_called_once()
-
-
-# ===========================================================================
-# _enter_option_trade — various rejection paths and success (engine=_make_engine())
-# ===========================================================================
-
-
-class TestEnterOptionTrade:
-    """Covers lines 226-227, 259, 322, 343-399 in unified_executor.py."""
-
-    def _make_good_quote(self, ask_price: float = 2.50) -> MagicMock:
-        q = MagicMock()
-        q.ask_price = ask_price
-        return q
-
-    def _stub_quotes(self, ex: UnifiedExecutor, ask_price: float) -> None:
-        """Mock Alpaca quote fetch so ``.get(occ)`` always returns a valid ask.
-
-        ``OptionLatestQuoteRequest`` is a MagicMock in unit tests, so kwargs are
-        not available on the request object — key the response by ``.get`` instead.
-        """
-        quote = self._make_good_quote(ask_price=ask_price)
-
-        def _side_effect(_req):
-            quotes = MagicMock()
-            quotes.get.return_value = quote
-            return quotes
-
-        ex.data_handler.option_historical_client.get_option_latest_quote.side_effect = (
-            _side_effect
-        )
-
-    def test_no_expiration_returns_none(self) -> None:
-        """When data_handler returns no expirations → returns None immediately."""
-        ex = _make_executor(equity=50_000.0)
-        strategy = _make_strategy()
-        ex.data_handler.get_option_expirations.return_value = []
-
-        result = ex._enter_option_trade(
-            strategy,
-            "SPY",
-            {"Signal": "BUY_CALL", "Close": 450.0},
-            engine=_make_engine(),
-        )
-
-        assert result is None
-        ex.client.submit_order.assert_not_called()
-
-    def test_no_valid_occ_symbol_returns_none(self) -> None:
-        """All quote fetches return no valid ask → returns None after strike scan."""
-        ex = _make_executor(equity=50_000.0)
-        strategy = _make_strategy()
-        strategy.config.MIN_OPTION_DTE = 7
-        ex.data_handler.get_option_expirations.return_value = ["2030-01-01"]
-        # All quote lookups return None for the symbol key
-        ex.data_handler.option_historical_client.get_option_latest_quote.return_value = {}
-
-        result = ex._enter_option_trade(
-            strategy,
-            "SPY",
-            {"Signal": "BUY_CALL", "Close": 450.0},
-            engine=_make_engine(),
-        )
-
-        assert result is None
-        ex.client.submit_order.assert_not_called()
-
-    def test_qty_less_than_one_returns_none(self) -> None:
-        """Engine sizing returns 0 contracts → returns None."""
-        ex = _make_executor(equity=10.0)
-        strategy = _make_strategy()
-        strategy.config.MIN_OPTION_DTE = 7
-        strategy.config.CAPITAL_PER_TRADE = 0.10
-        ex.data_handler.get_option_expirations.return_value = ["2030-01-01"]
-        self._stub_quotes(ex, ask_price=2.50)
-
-        eng = _make_engine()
-        with patch.object(
-            _ue_module,
-            "size_for_signal",
-            side_effect=lambda signal, **kw: {"n_contracts": 0, "capital": 1.0},
-        ):
-            result = ex._enter_option_trade(
-                strategy,
-                "SPY",
-                {"Signal": "BUY_CALL", "Close": 450.0},
-                engine=eng,
-            )
-
-        assert result is None
-
-    def test_success_returns_option_position_dict(self) -> None:
-        """Happy path: valid expiry + quote + enough capital → returns position dict."""
-        ex = _make_executor(equity=100_000.0)
-        strategy = _make_strategy()
-        strategy.config.MIN_OPTION_DTE = 7
-        strategy.config.CAPITAL_PER_TRADE = 0.10
-
-        ex.data_handler.get_option_expirations.return_value = ["2030-01-01"]
-        self._stub_quotes(ex, ask_price=2.50)
-
-        mock_order = MagicMock()
-        mock_order.id = "opt-ord-001"
-        _client_mock(ex).submit_order.return_value = mock_order
-
-        result = ex._enter_option_trade(
-            strategy,
-            "SPY",
-            {"Signal": "BUY_CALL", "Close": 450.0, "Confidence": 0.85},
-            engine=_make_engine(),
-        )
-
-        assert result is not None
-        assert result["AssetType"] == "OPTION"
-        assert result["Ticker"] == "SPY"
-        assert result["OptionType"] == "call"
-        assert result["OrderId"] == "opt-ord-001"
-        ex.equity_mgr.debit.assert_called_once()
-
-    def test_quote_exception_skips_to_next_offset(self) -> None:
-        """If quote fetch raises for first strike offset, falls through to next one."""
-        ex = _make_executor(equity=100_000.0)
-        strategy = _make_strategy()
-        strategy.config.MIN_OPTION_DTE = 7
-        strategy.config.CAPITAL_PER_TRADE = 0.10
-
-        ex.data_handler.get_option_expirations.return_value = ["2030-01-01"]
-
-        call_count = {"n": 0}
-        good_quote = self._make_good_quote(ask_price=1.50)
-
-        def _quote_side_effect(_req):
-            call_count["n"] += 1
-            if call_count["n"] == 1:
-                raise RuntimeError("API error")
-            quotes = MagicMock()
-            quotes.get.return_value = good_quote
-            return quotes
-
-        ex.data_handler.option_historical_client.get_option_latest_quote.side_effect = (
-            _quote_side_effect
-        )
-
-        mock_order = MagicMock()
-        mock_order.id = "opt-ord-002"
-        _client_mock(ex).submit_order.return_value = mock_order
-
-        result = ex._enter_option_trade(
-            strategy,
-            "SPY",
-            {"Signal": "BUY_CALL", "Close": 450.0},
-            engine=_make_engine(),
-        )
-
-        assert result is not None
-        assert result["AssetType"] == "OPTION"
-        assert call_count["n"] >= 2
-
-
-# ===========================================================================
 # Concurrency — thread-local client/equity isolation (regression)
 # ===========================================================================
 # Proves that client/equity resolution is per-thread: when several threads
@@ -893,7 +568,7 @@ import threading
 
 class TestConcurrentClientIsolation:
     def _make_real_executor(self) -> tuple[UnifiedExecutor, dict[str, MagicMock]]:
-        """UnifiedExecutor with real MultiClientEquityManager + IronCondorExecutor."""
+        """UnifiedExecutor with real MultiClientEquityManager."""
         paper_account = MagicMock()
         paper_account.equity = "10000.0"
         prod_account = MagicMock()
@@ -919,7 +594,6 @@ class TestConcurrentClientIsolation:
             assert ex.set_client(name, clients[name]) is True
             barrier.wait()  # both threads armed before either reads
             results[f"{name}_client"] = ex.client
-            results[f"{name}_ic_client"] = ex.ic_executor.client
             results[f"{name}_equity"] = ex.equity_mgr.active_client
 
         threads = [
@@ -935,8 +609,6 @@ class TestConcurrentClientIsolation:
         # Paper thread sees paper everywhere; prod thread sees prod everywhere.
         assert results["paper_client"] is clients["paper"]
         assert results["prod_client"] is clients["prod"]
-        assert results["paper_ic_client"] is clients["paper"]
-        assert results["prod_ic_client"] is clients["prod"]
         assert results["paper_equity"] == "paper"
         assert results["prod_equity"] == "prod"
 
@@ -954,7 +626,6 @@ class TestConcurrentClientIsolation:
             # one thread would read the other's account here.
             resolved[name] = {
                 "order_client": ex.client,
-                "ic_order_client": ex.ic_executor.client,
                 "sizing_equity": ex.equity_mgr.get(),
             }
 
@@ -970,8 +641,6 @@ class TestConcurrentClientIsolation:
 
         assert resolved["paper"]["order_client"] is clients["paper"]
         assert resolved["prod"]["order_client"] is clients["prod"]
-        assert resolved["paper"]["ic_order_client"] is clients["paper"]
-        assert resolved["prod"]["ic_order_client"] is clients["prod"]
         # Distinct account balances: paper 10k, prod 20k — wrong-account
         # reads would cross these.
         assert resolved["paper"]["sizing_equity"] == 10000.0
@@ -985,7 +654,6 @@ class TestConcurrentClientIsolation:
 
         def worker() -> None:
             resolved["client"] = ex.client
-            resolved["ic_client"] = ex.ic_executor.client
             resolved["equity"] = ex.equity_mgr.active_client
 
         t = threading.Thread(target=worker)
@@ -993,7 +661,6 @@ class TestConcurrentClientIsolation:
         t.join()
 
         assert resolved["client"] is clients["paper"]
-        assert resolved["ic_client"] is clients["paper"]
         assert resolved["equity"] == "paper"
 
     def test_client_set_to_none_falls_back_to_default(self) -> None:
@@ -1004,5 +671,3 @@ class TestConcurrentClientIsolation:
 
         ex.client = None
         assert ex.client is clients["paper"]
-        ex.ic_executor.client = None
-        assert ex.ic_executor.client is clients["paper"]

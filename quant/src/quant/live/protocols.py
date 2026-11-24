@@ -85,12 +85,12 @@ class LivePositionDict(PositionDict, total=False):
     The single sanctioned ``PositionDict`` subclass in the codebase: it extends
     the backtest-compatible shared contract with live-only execution/broker
     fields (Strategy, Ticker, Env, OccSymbol, IC legs, OrderIds) that are passed
-    as **extra kwargs to ``engine.build_position`` / ``engine.build_ic_position``.
+    as **extra kwargs to ``engine.build_position``.
 
     A record is only trustworthy as a live IC position once it passes
     ``is_live_ic_position`` — do not construct or ``cast`` one without running
-    that boundary guard. Unknown strategy/options fields use the shared
-    ``quant.utils.options.ICMeta`` envelope, not additional subclasses.
+    that boundary guard. Unknown strategy/options fields ride the record as
+    flat extras; do not add further subclasses.
     """
 
     # ── Common live fields ──────────────────────────────────────────────────

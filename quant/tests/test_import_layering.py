@@ -7,11 +7,11 @@ The submodule enforces one-way layering (see ``openspec/changes/...`` and the
   modules (``quant.utils.*``) and the standard library, never ``quant.core`` /
   ``quant.data`` / ``quant.backtest`` / ``quant.strategies``.
 * ``quant.backtest`` is the simulator — a **terminal** consumer.  Nothing
-  outside ``src/quant/backtest/**`` may import it (except a documented
-  ``# layering-ok`` shadow-signal bridge in ``core/monitor_utils.py``).
+  outside ``src/quant/backtest/**`` may import it.
 * ``quant.strategies`` is private alpha — nothing outside
-  ``src/quant/strategies/**`` (or the monitor's single noqa'd dynamic-load
-  line) may import it.
+  ``src/quant/strategies/**`` (or ``live/strategy_loader.py``'s single noqa'd
+  dynamic-load line) may import it.  (The old ``core/monitor_utils.py``
+  shadow-signal bridge was cut in the group 7 monitor trim.)
 
 These rules are enforced by ruff ``TID251`` ``banned-api`` in ``pyproject.toml``
 AND scanned here at the AST level, so a missing ``banned-api`` entry is still

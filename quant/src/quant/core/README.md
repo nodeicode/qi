@@ -203,5 +203,5 @@ from quant.core._utils import (
     bar_close_utc,
 )
 from quant.core.sizing import size_for_signal, size_for_asset
-from quant.core.monitor_utils import Span, SpanName, span_key, SLO_SPAN_KEYS
+from quant.observability import Span, SpanName, span_key, SLO_SPAN_KEYS
 ```

@@ -38,9 +38,6 @@ HANDLERS_ROOT = Path(__file__).resolve().parents[2] / "src" / "quant" / "data"
 # would mislabel them. It has no engine consumer.
 HANDLER_MODULES = {
     "data_handler.py": True,  # wired: AlpacaDataHandler
-    "futures_data_handler.py": True,  # wired: intraday → to_naive_index
-    "options_data_handler.py": True,  # wired: engine-facing frames → naive
-    "vix_data_handler.py": True,  # wired: daily → to_naive_utc + assert
 }
 
 EXCLUDED_HANDLERS = {"dhan_data_handler.py"}

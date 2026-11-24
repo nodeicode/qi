@@ -38,32 +38,25 @@ def stub_alpaca(monkeypatch: pytest.MonkeyPatch):
 
 @pytest.fixture(autouse=True)
 def mock_monitor(request: pytest.FixtureRequest):
-    """Stub the monitor sidecar for trader/integration tests.
+    """Stub the monitor emit hook for trader/integration tests.
 
-    ``UnifiedTrader`` starts the real sidecar by default (``MONITOR=1``).
-    Fake test strategies are not in the registry, so a live sidecar would
-    ERROR on every shadow lookup.  Instead:
+    ``UnifiedTrader`` wires the optional emit hook by default (``MONITOR=1``);
+    the queue consumer (sidecar) is a developer-built extension, and the
+    public tree no longer ships one.  ``emit`` is a ``MagicMock`` that
+    records events for assertions, and the trader still wires
+    ``_monitor_emit`` into ``TradingEngine`` as in prod.
 
-    - ``start_sidecar`` / ``stop_sidecar`` are no-ops (no child process)
-    - ``emit`` is a ``MagicMock`` that records events for assertions
-    - Trader still wires ``_monitor_emit`` into ``TradingEngine`` as in prod
-
-    ``tests/unit/test_monitor_emit.py`` exercises the real emit/sidecar
-    modules and is excluded from this stub.
+    ``tests/unit/test_monitor_emit.py`` exercises the real emit module and is
+    excluded from this stub.
     """
     if request.module.__name__.endswith("test_monitor_emit"):
         yield None
         return
 
     mock_emit = MagicMock(name="monitor_emit")
-    with (
-        patch("quant.live.monitor.emit.start_sidecar") as mock_start,
-        patch("quant.live.monitor.emit.stop_sidecar"),
-        patch("quant.live.monitor.emit.emit", mock_emit),
-    ):
+    with patch("quant.live.monitor.emit.emit", mock_emit):
         # Attach for unittest.TestCase methods that cannot take fixtures.
         request.node.monitor_emit = mock_emit
-        request.node.monitor_start = mock_start
         yield mock_emit
 
 
@@ -117,11 +110,6 @@ def pytest_sessionfinish(session, exitstatus) -> None:
     Removing all handlers here (before atexit fires) ensures the hook
     fires silently: loggers still exist but have nowhere to write.
     """
-    with contextlib.suppress(Exception):
-        from quant.live.monitor.emit import stop_sidecar
-
-        stop_sidecar(timeout=0.5)
-
     all_loggers: list[logging.Logger] = [logging.getLogger()]
     for candidate in logging.Logger.manager.loggerDict.values():
         if isinstance(candidate, logging.Logger):

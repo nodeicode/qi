@@ -34,18 +34,16 @@ import pandas as pd
 from quant.core._utils import (
     DEFAULT_INDICATOR_COLUMNS,
     SIGNAL_REGISTRY,
+    MonitorTelemetry,
+    TickMonitorContext,
     check_entry_gate,
+    evaluate_manage_exit,
     fetch_data,
     fetch_manage_data,
+    resolve_data_delay_min,
     select_signal_row,
     signal_asset_class,
     signal_direction,
-)
-from quant.core.monitor_utils import (
-    MonitorTelemetry,
-    TickMonitorContext,
-    evaluate_manage_exit,
-    resolve_data_delay_min,
 )
 from quant.observability import Span, SpanName, span_key
 from quant.utils.positions import build_position_dict
@@ -735,6 +733,6 @@ class TradingEngine:
             **extra,
         )
 
-    # IC positions are built by the shared free function
-    # ``quant.utils.options.build_ic_position`` (both backtest and live
-    # executors hold ``strategy.config`` and pass it in).
+    # IC positions were built by the shared free function
+    # ``quant.utils.options.build_ic_position`` (removed with the
+    # equity-only trim).

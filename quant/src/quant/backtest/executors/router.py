@@ -21,8 +21,6 @@ from typing import TYPE_CHECKING, cast
 from quant.backtest.executors.base_executor import BaseBacktestExecutor
 from quant.backtest.executors.context import BacktestExecContext
 from quant.backtest.executors.equity import EquityExecutor
-from quant.backtest.executors.futures import FuturesExecutor
-from quant.backtest.executors.ic import IronCondorExecutor
 from quant.backtest.utils import calculate_entry_time
 from quant.core import TradingEngine
 from quant.core._utils import SIGNAL_REGISTRY
@@ -33,11 +31,9 @@ if TYPE_CHECKING:
 
 import pandas as pd
 
-# Default registry — register more classes (OPTION, SPREAD, IC) as they land.
+# Default registry — register more asset classes as their executors land.
 DEFAULT_REGISTRY: dict[str, type[BaseBacktestExecutor]] = {
     "EQUITY": EquityExecutor,
-    "IC": IronCondorExecutor,
-    "FUTURES": FuturesExecutor,
 }
 
 

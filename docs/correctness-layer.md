@@ -96,7 +96,7 @@ When the live decision and the shadow disagree, a drift event is also emitted
 |---|---|
 | Emitter (async, hot path) | `python/monitor/emit.py` |
 | Sidecar (consumer, own process) | `python/monitor/sidecar.py` |
-| Shadow + staleness logic | `quant/core/monitor_utils.py` |
+| Staleness + telemetry helpers | `quant/core/_utils.py` (shadow/sidecar moved to the private superset) |
 | Metric dictionary | see root `README.md` → Latency metric dictionary |
 
 **CloudWatch:** the instances stream these logs (`python/trader.log`, sidecar

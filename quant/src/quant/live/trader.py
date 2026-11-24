@@ -59,12 +59,6 @@ logger = setup_logging()
 
 def cleanup():
     logger.info("Shutting down trader...")
-    try:
-        from quant.live.monitor.emit import stop_sidecar
-
-        stop_sidecar()
-    except Exception:
-        pass
     logging.shutdown()
 
 
@@ -108,23 +102,21 @@ class UnifiedTrader:
         # Initialize Strategies
         self.strategies = load_strategies(self.config, self.data_handler, self.logger)
 
-        # Async monitor sidecar (signal drift + latency). On by default; MONITOR=0 to opt out.
-        # Resolved before engines so TradingEngine can take an inject emit callback —
-        # quant never imports quant.live.monitor.
+        # Optional monitor emit hook (signal drift + latency telemetry). On by
+        # default; MONITOR=0 to opt out. Resolved before engines so
+        # TradingEngine can take an inject emit callback — quant never imports
+        # quant.live.monitor. The queue consumer is a developer-built
+        # extension (design D7); without one wired, ``emit`` is a no-op and
+        # nothing is emitted.
         self._monitor_emit = None
         self._monitor_enabled = os.environ.get("MONITOR", "1") == "1"
         if self._monitor_enabled:
             try:
                 from quant.live.monitor.emit import emit as monitor_emit
-                from quant.live.monitor.emit import start_sidecar
 
-                start_sidecar(
-                    metrics_path="monitor_metrics.jsonl",
-                    state_path="monitor_sidecar_state.json",
-                )
                 self._monitor_emit = monitor_emit
             except Exception as e:
-                self.logger.exception("[MONITOR] failed to start sidecar: %s", e)
+                self.logger.exception("[MONITOR] failed to wire emit hook: %s", e)
                 self._monitor_enabled = False
         else:
             self.logger.info("[MONITOR] disabled (set MONITOR=1 to enable)")
@@ -443,7 +435,7 @@ class UnifiedTrader:
         ``tick_dispatch_ns`` contextvar, which the engine's monitor events pick
         up without any engine↔trader coupling.
         """
-        from quant.core.monitor_utils import set_tick_dispatch_ns, tick_dispatch_ns
+        from quant.core._utils import set_tick_dispatch_ns, tick_dispatch_ns
         from quant.live.utils import suspend_gc
 
         # Optional GC hot-path pause around the decision compute. Measured
