@@ -11,13 +11,76 @@ from __future__ import annotations
 
 import logging
 from datetime import time
-from typing import Any
+from typing import Any, Callable
 
+from quant.order import Order, OrderPriceType
+from quant.portfolio import Fill
 from quant.venue.base import (
     BaseVenue,
     CalendarProtocol,
     DataSourceProtocol,
 )
+
+
+class BacktestExecutionClient:
+    """Deterministic backtest execution client: typed ``Order`` -> simulated fill.
+
+    ``price_source`` resolves the tradable price for an order at submission —
+    the engine feeds the closed signal bar's tradable close, so the author
+    body ran on adjusted bars while the fill prices in tradable space. A
+    MARKET order fills at that price; a LIMIT order fills at the market price
+    only when the limit is crossed (BUY: market <= limit; SELL: market >=
+    limit). An order with no resolvable positive price, or a limit that is
+    not crossed, reports ``None`` (not filled), so an unfulfillable order
+    never touches the portfolio. When a ``portfolio`` is held, a reported
+    fill is applied to it on submission (venue-owned fills feed the
+    portfolio the strategy reads).
+    """
+
+    def __init__(
+        self,
+        *,
+        price_source: Callable[[Order], float | None] | None = None,
+        portfolio: Any = None,
+        logger: logging.Logger | None = None,
+    ) -> None:
+        self._price_source: Callable[[Order], float | None] = price_source or (
+            lambda _order: None
+        )
+        self.portfolio = portfolio
+        self._log = logger or logging.getLogger(__name__)
+
+    def submit(self, order: Order) -> Fill | None:
+        """Simulate a fill for *order* at the tradable price, or ``None``."""
+        market = self._price_source(order)
+        if market is None or float(market) <= 0:
+            return None
+        fill_price = self._resolve_fill_price(order, float(market))
+        if fill_price is None or fill_price <= 0:
+            return None
+
+        fill = Fill(
+            venue=order.venue,
+            symbol=order.instrument.symbol,
+            side=order.side,
+            qty=float(order.quantity),
+            price=fill_price,
+            strategy=order.strategy,
+            instrument=order.instrument,
+        )
+        if self.portfolio is not None:
+            self.portfolio.apply_fill(fill)
+        return fill
+
+    def _resolve_fill_price(self, order: Order, market: float) -> float | None:
+        """Fill at *market* only when a limit order's limit is crossed."""
+        if order.price_type is OrderPriceType.MARKET or order.price is None:
+            return market
+        if order.side.value == "BUY" and market <= float(order.price):
+            return market
+        if order.side.value == "SELL" and market >= float(order.price):
+            return market
+        return None
 
 
 class BacktestVenue(BaseVenue):

@@ -45,6 +45,7 @@ from quant.core._utils import (
     signal_direction,
 )
 from quant.observability import Span, SpanName, span_key
+from quant.order import Order
 from quant.portfolio import Position, PositionState
 from quant.utils.positions import build_position_dict
 from quant.utils.strategy_config import BaseStrategyConfig
@@ -719,6 +720,49 @@ class TradingEngine:
 
             except Exception as e:
                 self._log.exception("[%s] Error processing %s: %s", s_name, ticker, e)
+
+    # ─────────────────────────────────────────────────────────────────
+    # Order submission to the venue
+    # ─────────────────────────────────────────────────────────────────
+
+    def submit_decisions(
+        self,
+        venue: Any,
+        portfolio: Any,
+        decisions: Sequence[Any],
+    ) -> list[Any]:
+        """Submit the author body's decided ``Order``\ s to *venue* and report fills.
+
+        The declarative ``decide`` returns typed ``Order``\ s (built via
+        ``instrument.make_order``); the engine submits each one to the
+        declared venue's ``execution_client``. Any returned fill feeds
+        ``portfolio`` (venue-owned fills — see ``BacktestExecutionClient``),
+        which is exactly what the strategy reads on the next tick. Non-order
+        decision items (exit intents) are routed by the venue's manage pass,
+        not here, so they are passed through untouched. Returns one reported
+        fill (or ``None`` for a rejected order) per submitted order, in order.
+
+        ``venue.execution_client.submit`` may be duck-typed: anything exposing
+        a ``submit(order)`` is accepted.
+        """
+        execution_client = getattr(venue, "execution_client", None)
+        submit = getattr(execution_client, "submit", None)
+        fills: list[Any] = []
+        for item in decisions:
+            if not isinstance(item, Order):
+                fills.append(None)  # non-order items are manage-pass intents
+                continue
+            if submit is None:
+                self._log.warning(
+                    "[%s] venue %s has no execution_client.submit — skipping order %s",
+                    getattr(self.strategy, "name", "?"),
+                    getattr(venue, "id", str(venue)),
+                    item,
+                )
+                fills.append(None)
+                continue
+            fills.append(submit(item))
+        return fills
 
     # ─────────────────────────────────────────────────────────────────
     # Position building

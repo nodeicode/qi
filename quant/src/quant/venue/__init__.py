@@ -9,7 +9,7 @@ adapters; the decision boundary is naive-UTC (``to_utc_naive``).
 
 from quant.venue._registry import register_venue, venue_by_name
 from quant.venue.alpaca import AlpacaCalendar, AlpacaVenue
-from quant.venue.backtest import BacktestVenue
+from quant.venue.backtest import BacktestExecutionClient, BacktestVenue
 from quant.venue.base import (
     DEFAULT_CLOSE,
     DEFAULT_FORCE_CLOSE,
@@ -17,6 +17,7 @@ from quant.venue.base import (
     BaseVenue,
     CalendarProtocol,
     DataSourceProtocol,
+    ExecutionClientProtocol,
     SessionDay,
     Venue,
     to_utc_naive,
@@ -28,10 +29,12 @@ __all__ = [
     "DEFAULT_OPEN",
     "AlpacaCalendar",
     "AlpacaVenue",
+    "BacktestExecutionClient",
     "BacktestVenue",
     "BaseVenue",
     "CalendarProtocol",
     "DataSourceProtocol",
+    "ExecutionClientProtocol",
     "SessionDay",
     "Venue",
     "register_venue",

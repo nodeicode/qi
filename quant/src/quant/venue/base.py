@@ -12,9 +12,13 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 import pandas as pd
+
+if TYPE_CHECKING:
+    from quant.portfolio.base import Fill
+    from quant.order import Order
 
 # US-equity fallback hours (generous defaults, logged when the calendar is
 # unavailable) — mirrors the legacy ``MarketSchedule`` defaults.
@@ -37,6 +41,20 @@ class DataSourceProtocol(Protocol):
         use_cache: bool = True,
         adjustment: str | None = None,
     ) -> pd.DataFrame: ...
+
+
+@runtime_checkable
+class ExecutionClientProtocol(Protocol):
+    """Venue execution seam: accepts a typed ``Order`` and reports a ``Fill``.
+
+    The engine submits every order the author body builds (via
+    ``instrument.make_order``) to the declared venue's execution client; the
+    client resolves the fill and reports it (backtest: simulated from the
+    closed tradable bar the engine supplies; live: reconciled broker fill). A
+    ``None`` return means the order was not filled on this attempt (gated/rejected).
+    """
+
+    def submit(self, order: Order) -> Fill | None: ...
 
 
 @runtime_checkable
