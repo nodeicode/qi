@@ -46,8 +46,10 @@ Target shape:
 
 - **Strategy is an author-owned body** that declares typed instruments, typed
   data subscriptions `(instrument, datatype, cadence)`, and a venue, then
-  decides over typed data events and an injected **read-only** portfolio/
-  account projection. It sizes itself from instrument contract facts.
+  decides over typed data events and the injected **read-only** Portfolio.
+  `decide` is the single merged signal+manage function: it generates entries
+  and evaluates the Portfolio's existing positions for exits, and sizes
+  itself from instrument contract facts.
 - **Routing starts from typed instruments.** `SIGNAL_REGISTRY`,
   `SIZING_STRATEGIES`, and the executor router's asset-class dispatch are
   deleted; the instrument *is* the type (options resolve their `underlying`).
@@ -79,8 +81,8 @@ Target shape:
   orders reshaped into venue-bound clients; conformance on the venue seam.
 - **`instruments`** — contract facts + `make_order` on typed instruments;
   conformance extended to the order-construction surface.
-- **`portfolio`** — ADDED read-only account projection the strategy sizes
-  against (mutation blocked by construction).
+- **`portfolio`** — ADDED: the Portfolio itself is injected read-only into
+  `decide` (no projection class; mutation blocked by construction).
 - **`strategy-sdk`** — 3-method protocol and registry/loader replaced by the
   declarative surface; unknown venue/strategy rejected at construction.
 - **`venue`** — unchanged primitive (its `data_source` + `execution_client`

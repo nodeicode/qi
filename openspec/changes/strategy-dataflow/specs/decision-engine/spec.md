@@ -82,6 +82,26 @@ GIVEN a divergence between the two venues in the parity test
 WHEN it is inspected
 THEN the divergence is attributable to the venue execution client (fill simulation vs real order flow) rather than to the strategy body
 
+### Requirement: Author-body observability
+
+The reshaped engine MUST keep the telemetry neutrality contract: it runs
+identically with or without an emit hook. The span set MUST be redefined for
+the author body — e.g. a per-tick `DECIDE` span (plus submission/venue effect
+spans) replacing the deleted `RUN_SIGNALS`/`PROCESS_TICKER`/`EXECUTION_DISPATCH`
+spans — recorded through the shared span primitive (`quant/observability.py`)
+so backtest and live report comparable numbers. The removed engine spans
+MUST NOT leave dangling telemetry references in `quant/core/engine.py`.
+
+#### Scenario: Backtest runs without an emit hook
+GIVEN no emit hook is provided
+WHEN the reshaped pipeline runs in backtest
+THEN it produces identical decisions and emits nothing
+
+#### Scenario: Author-body spans recorded with a hook
+GIVEN an emit hook is wired
+WHEN the reshaped pipeline runs
+THEN `DECIDE` and submission spans are recorded through the shared telemetry primitive
+
 ## MODIFIED Requirements
 
 ### Requirement: One deterministic decision entry point
@@ -90,10 +110,9 @@ All trading decisions MUST flow through `process_strategy(strategy, now,
 venue)` — the `executor: ExecutorProtocol` parameter becomes the venue.
 The reshaped loop resolves the declared subscriptions, serves closed bars
 from `self._buffers` (backtest replay or live `data_source`), drives the
-author body with (events, account projection), submits returned typed
-`Order`s to the venue's execution client, and appends the transcript.
-Backtest and live MUST invoke the same transformed path; the venue is the
-only divergence.
+author body with (events, portfolio), submits returned typed `Order`s to the
+venue's execution client, and appends the transcript. Backtest and live MUST
+invoke the same transformed path; the venue is the only divergence.
 
 #### Scenario: Backtest and live drive the same function
 GIVEN a backtest run and a live run of the same strategy
@@ -109,16 +128,24 @@ THEN the recorded decision sequences (entries, exits, sizes, orders) are identic
 
 The engine MUST gate signal generation and manage decisions by the
 per-subscription cadence of the strategy's declared subscriptions on closed
-bars only. `INTERVAL`/`MANAGE_INTERVAL` config gates, `executor.should_run`
-/ `record_run` / `data_end_dt` / `get_precomputed_signal`, and the engine's
-embedded phasing in `process_strategy` MUST be deleted; no data fetches
+bars only, **plus the venue's session calendar** (`is_open_at` / forced-close
+from `quant/venue/base.py`): the strategy never runs when the venue says the
+market is closed, and the venue's forced-close bounds exits. `INTERVAL`/
+`MANAGE_INTERVAL` config gates, `executor.should_run` / `record_run` /
+`data_end_dt` / `get_precomputed_signal`, and the engine's embedded phasing
+in `process_strategy` MUST be deleted; no data fetches
 (`fetch_data`/`fetch_manage_data` calls) or ad-hoc clocks inside the decision
 path.
 
 #### Scenario: Manage-only bar skips signal work
 GIVEN a manage-cadence tick for a strategy with open positions
 WHEN the engine processes it
-THEN the author body's manage path runs and the signal path is skipped (no signal work, no signal fetches)
+THEN the author body's manage pass runs (evaluating portfolio positions) and the signal pass is skipped (no signal work, no signal fetches)
+
+#### Scenario: Closed session gates the run
+GIVEN a tick outside the venue's session calendar (or at forced-close)
+WHEN the engine would run
+THEN the body does not run new entries and exits are bounded by the venue's forced-close
 
 #### Scenario: Signal bar runs full pipeline
 GIVEN a signal-cadence tick
@@ -150,8 +177,8 @@ decision path; `SIZING_STRATEGIES`/`SizingRegistry`/`size_for_asset`/
 `size_for_signal` (quant/core/sizing.py) and their call sites
 (`quant/backtest/executors/equity.py`, `quant/live/executors/unified_executor.py`)
 MUST be removed. The author body decides entries and sizes from instrument
-contract facts plus the injected read-only account projection, returning a
-target expressed as a typed `Order`.
+contract facts plus the injected read-only Portfolio (equity, available
+margin, open exposure), returning a target expressed as a typed `Order`.
 
 #### Scenario: Entry outside gate window blocked
 GIVEN an entry the author body evaluates outside its own gate
@@ -166,7 +193,7 @@ THEN the gate decision is the body's own expression over typed data and account 
 #### Scenario: No sizing registry on the path
 GIVEN an entry decision
 WHEN a quantity is produced
-THEN it comes from the author body's sizing over instrument facts + projection, and `size_for_signal`/`SIZING_STRATEGIES` are absent from `quant/core/`
+THEN it comes from the author body's sizing over instrument facts + the Portfolio, and `size_for_signal`/`SIZING_STRATEGIES` are absent from `quant/core/`
 
 #### Scenario: Canonical position request
 GIVEN an order produced by the author body
@@ -175,18 +202,22 @@ THEN it follows the canonical typed-`Order` schema (`quant/order.py`) shared wit
 
 ### Requirement: Fixed-size position and manage contracts
 
-The engine MUST call the author body with stable contracts over typed data:
-manage steps consume only closed data of the declared cadence (engine-side
-`evaluate_manage_exit`/`call_manage_trade` replaced by the author's exit
-intents), features are the author's own computation, CLOSED positions
-(`quant/portfolio/*` `PositionState`) are never managed, and a pre-fill bar
-never triggers an exit. Author body errors MUST fail that tick loudly
-(logged + monitored), not silently.
+The engine MUST call a single author body (`decide(events, portfolio)`) with
+stable contracts over typed data: manage steps consume only closed data of
+the declared cadence and the author evaluates the portfolio's existing open
+positions for exits (engine-side `evaluate_manage_exit`/`call_manage_trade`
+replaced by the author's exit intents), the author reads the framework risk
+fields (`STOP_LOSS_PERCENT`/`TAKE_PROFIT_PERCENT`/`MAX_HOLDING_MINUTES`/
+`USE_TRAIL_LOSS`) from its config to drive those exits, features are the
+author's own computation, CLOSED positions (`quant/portfolio/*`
+`PositionState`) are never managed, and a pre-fill bar never triggers an
+exit. Author body errors MUST fail that tick loudly (logged + monitored),
+not silently.
 
 #### Scenario: Manage receives injected indicators
 GIVEN a strategy declaring its manage-cadence subscription
 WHEN the manage step is invoked
-THEN the passed frame contains the closed bars of that cadence from `self._buffers` — the author computes its own features, `evaluate_manage_exit` is gone
+THEN the passed events contain the closed bars of that cadence from `self._buffers` and the portfolio holds the open positions — the author computes its own features and evaluates exits, `evaluate_manage_exit` is gone
 
 #### Scenario: Strategy error is loud and contained
 GIVEN the author body raises during processing

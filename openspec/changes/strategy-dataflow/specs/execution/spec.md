@@ -20,6 +20,31 @@ GIVEN a typed `Order` constructed for a strategy
 WHEN it is serialized and deserialized
 THEN the round-tripped order equals the original, and the venue/portfolio seams accept the canonical shape
 
+### Requirement: Venue resolved from the strategy declaration
+
+The driver (backtester on the backtest root; trader on the live root) MUST
+resolve `config.venue` (a registered venue id) to a `Venue` instance wired
+with its `data_source` and `execution_client` (`quant/venue/base.py` +
+`quant/venue/_registry.py`), and pass that venue to `process_strategy`.
+Backtest resolves the backtest venue (deterministic fills); live resolves
+the registered live venue (broker-bound). An unknown venue id MUST fail
+construction loudly.
+
+#### Scenario: Backtest resolves the backtest venue
+GIVEN a strategy declaring `venue="backtest"`
+WHEN the backtester constructs the run
+THEN it resolves the backtest venue (deterministic simulated fills) and passes it to `process_strategy`
+
+#### Scenario: Live resolves the registered live venue
+GIVEN a strategy declaring a registered live venue id
+WHEN the trader constructs the run
+THEN it resolves that venue's execution client (broker-bound, gated) and passes it to `process_strategy`
+
+#### Scenario: Unknown venue id rejected
+GIVEN a strategy declaring a venue id that is not registered
+WHEN the driver resolves it
+THEN construction fails loudly with the available venue ids
+
 ## REMOVED Requirements
 
 ### Requirement: Asset-class routing
@@ -65,7 +90,11 @@ client (`quant/venue/backtest.py`), reshaping the machinery from
 `ExecutorRouter`/`EquityExecutor`/`BacktestExecContext`
 (`quant/backtest/executors/*`): fills price on closed tradable bars, honor
 entry/exit timing rules, are gated (entry window, direction, session), and
-record into the run ledger for the equity-curve computation.
+record into the run ledger from which the equity curve and performance
+metrics (`Backtester.compute_equity_curve` /
+`calculate_performance_metrics`) are computed. At end of run the backtest
+venue MUST force-close any remaining open positions (replacing
+`ExecutorRouter.force_close_remaining`).
 
 #### Scenario: Fill prices in tradable space
 GIVEN a backtest order for a signal bar
@@ -94,7 +123,7 @@ THEN it verifies gates (e.g. market open, entry window) before placing the order
 #### Scenario: Partial fill tracked
 GIVEN a live order that fills partially
 WHEN the venue client reconciles
-THEN remaining quantity and status are tracked and reported in the position schema, and the account projection reflects the fill
+THEN remaining quantity and status are tracked and reported in the position schema, and the Portfolio the strategy reads reflects the fill
 
 ### Requirement: Parity contract
 

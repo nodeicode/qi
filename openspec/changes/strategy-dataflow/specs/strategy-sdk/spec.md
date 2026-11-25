@@ -14,9 +14,9 @@ compatibility shim.
 
 `StrategyProtocol` (`quant/core/protocols.py`) MUST be replaced by the
 declarative surface: `config: BaseStrategyConfig` whose declarations name
-the instruments, subscriptions, and venue, plus an author body over typed
-data events + the read-only account projection, returning typed `Order`s /
-exit intents. The 3 method contract (`calculate_indicators` /
+the instruments, subscriptions, and venue, plus a single author body
+`decide(events, portfolio)` over typed data events + the read-only
+Portfolio, returning typed `Order`s / exit intents. The 3 method contract (`calculate_indicators` /
 `generate_signals` with string `Signal`/`Confidence`/`Reason` columns /
 `manage_trade`) MUST be removed. `TradingEngine.__init__` MUST stop checking
 the three methods and `INDICATOR_COLUMNS`/ticker-kwarg inspection and

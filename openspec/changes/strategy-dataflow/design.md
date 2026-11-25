@@ -89,10 +89,15 @@ tables instead of adding them.
 - The engine/executors stop calling `size_for_signal`
   (backtest/executors/equity.py `EquityExecutor.enter`,
   live/executors/unified_executor.py). A strategy sizes from instrument
-  contract facts + the injected read-only account projection (D6) — a
-  futures strategy uses margin/multiplier, not a generic capital fraction.
+  contract facts + the injected read-only Portfolio (D6) — a futures
+  strategy uses margin/multiplier, not a generic capital fraction.
 - The strategy returns a target quantity; `instrument.make_order` turns it
   into a typed `Order`.
+- The same author body folds in the **exit side** of sizing: evaluating the
+  portfolio's existing positions against the config risk fields
+  (`stop_loss`/`take_profit`/`max_hold`) replaces the engine's
+  `evaluate_manage_exit`, so `decide` is the single merged
+  signal-and-manage function.
 
 ### D4 — The data port reshapes to typed subscriptions (bars first)
 
@@ -103,6 +108,10 @@ tables instead of adding them.
   (replay of pre-loaded frames — `Backtester._prefetch_data` feeds the
   subscription buffer, no re-parse per bar), `quant/data/synthetic_data_handler.py`,
   the live Alpaca handler/cache path (`quant/data/*`).
+- Live delivery is **streaming into the same subscription buffers**
+  (`quant/data/ws/aggregator.py` + `quant/data/ws/streams/*` append settled
+  bars), so backtest replay and live stream fulfill the same buffer with an
+  identical typed shape; seed/edge semantics bind per subscription.
 - Out-of-range subscription windows return an **empty stream** without
   raising (replaces implicit frame-emptiness handling in the loop).
 - `SIGNAL_REGISTRY`-driven discovery/conformance
@@ -120,20 +129,30 @@ tables instead of adding them.
 - Live: `LiveExecutor`/`UnifiedExecutor` (`quant/live/executors/*`) and the
   `trader.py` loop reshape into the live venue's execution client: gated
   submission, partial-fill tracking into the position schema.
+- The driver resolves `config.venue` to a wired `Venue`
+  (`quant/venue/_registry.py`): backtest → `BacktestVenue`, live → the
+  registered live venue, each with `data_source` + `execution_client`; that
+  venue object is what `process_strategy` receives.
 - `ExecutorProtocol` (`should_run`, `data_end_dt`, `get_precomputed_signal`,
   `enter`, `record_run`; quant/core/protocols.py) is deleted — its concerns
-  land on subscriptions (schedule), the venue (execution), and the engine
-  loop (transcript). Custom-execution tests
+  land on the venue (execution + session calendar), subscriptions
+  (schedule), and the engine loop (transcript). Custom-execution tests
   (`test_conformance_executor.py`, `test_conformance_venue.py`) move to the
   venue seam against both roots.
+- End-of-run forced-close and the equity-curve/metrics ledger live on the
+  backtest venue (replacing `ExecutorRouter.force_close_remaining`);
+  `Backtester.compute_equity_curve`/`calculate_performance_metrics` keep
+  reading the run ledger.
 
-### D6 — Read-only account projection injected by the engine
+### D6 — The Portfolio is injected read-only; no projection class
 
-- The engine injects a read-only portfolio/account projection (equity,
-  available margin, open exposure) built from the existing
-  `quant/portfolio/*` primitives. The strategy reads it for sizing and
-  cannot mutate the portfolio — fills remain venue-owned (spec `portfolio`
-  ADDED requirement; invariants: projection is immutable from the strategy).
+- The engine passes the `Portfolio` itself (`quant/portfolio/*`), as a
+  read-only view, into `decide(events, portfolio)`. The strategy reads
+  equity, available margin, open exposure, and its own existing open
+  positions (for sizing and for evaluating exits). No separate
+  `AccountProjection` class is introduced — the handed `portfolio` exposes
+  no mutating surface, so the strategy cannot mutate it; fills remain
+  venue-owned (spec `portfolio` ADDED requirement).
 
 ### D7 — Determinism is pinned on the decision transcript
 

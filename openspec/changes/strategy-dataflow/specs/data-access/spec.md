@@ -8,6 +8,36 @@ and conformance run on the typed offer/fulfillment contract. The MemBars fast
 path, seed/edge semantics, and persistent cache survive, re-keyed per
 subscription.
 
+## ADDED Requirements
+
+### Requirement: Live subscription streaming to buffers
+
+On the live path, each declared subscription MUST be fulfilled by a stream
+(`quant/data/ws/aggregator.py` + `quant/data/ws/streams/*`) that appends
+**settled bars** (fully-formed buckets only) into the same per-subscription
+`_buffers` the engine reads — no per-bar re-fetch or re-parse. Backtest
+(replay of pre-loaded frames) and live (stream) MUST fulfill the same
+`(instrument, datatype, cadence)` buffer with an identical typed shape, and
+seed/edge semantics (seed from REST/cache on startup/pre-open, wait for the
+stream edge rather than fabricating a bar) MUST apply per subscription.
+Stream gaps MUST fall back to seed/edge without serving a bar newer than the
+stream has closed.
+
+#### Scenario: Stream appends settled bars to the subscription buffer
+GIVEN a live stream for a bars subscription
+WHEN a minute bucket fully settles
+THEN the settled bar is appended to the subscription buffer atomically and reads see it — partial bars are never served
+
+#### Scenario: Backtest replay and live stream fulfill the same buffer
+GIVEN the same `(instrument, "bars", cadence)` subscription
+WHEN fulfilled on the backtest root (replay) and the live root (stream)
+THEN both append the identical typed shape to the subscription buffer, and the engine feeds `decide` from that buffer in both
+
+#### Scenario: Stream gap falls back without fabricating
+GIVEN a stream gap for a subscription
+WHEN a read crosses the gap on the live path
+THEN the handler falls back to seed/cache or waits for the stream edge — it never serves a bar newer than the stream has closed
+
 ## MODIFIED Requirements
 
 ### Requirement: Data source protocol

@@ -3,9 +3,10 @@
 Reshape the existing engine pipeline **in place** into a strategy-to-venue
 data-flow architecture. The 3-method `StrategyProtocol` (signal strings routed
 through `SIGNAL_REGISTRY` → `SIZING_STRATEGIES` → asset-class executors) is
-replaced by an author-owned body that declares typed instruments + typed data
-subscriptions + a venue, sizes from instrument contract facts and an injected
-read-only account projection, and submits typed `Order`s to the venue. The
+replaced by a single author-owned body (`decide`) that declares typed
+instruments + typed data subscriptions + a venue, generates entries and
+evaluates existing positions from the injected read-only Portfolio, sizes
+from instrument contract facts, and submits typed `Order`s to the venue. The
 venue is the only environment seam; determinism is pinned by a recorded
 decision transcript over the same transformed code path.
 
