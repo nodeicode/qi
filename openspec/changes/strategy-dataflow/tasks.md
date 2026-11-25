@@ -12,6 +12,21 @@
 No commit may regress the suite. If a step cannot land green in one commit,
 split it — never layer a parallel path.
 
+**Revised implementation order (the engine-replacement is one atomic swap).**
+The engine reshape (`5.1`), the declarative `example_equity` rewrite (`6.1`),
+the legacy strategy/test teardown (`6.2`), and the golden re-pin (`5.4`)
+share a hard dependency cycle (the 8 legacy engine methods are load-bearing
+for the 3-method strategies and `Backtester`/`test_engine.py`; those
+strategies/tests can only run on the new path once they are declarative).
+They are therefore executed **together as a single coordinated swap commit
+(or a tight 2–3 commit batch)** that keeps the suite green at the boundary:
+rewrite `example_equity` declaratively → reshape `process_strategy` to the
+venue/buffers/`decide`/transcript path (incl. portfolio injection + cadence +
+venue-session + author-body spans) → delete the legacy 3-method
+`example_equity`, `GoldenEquityStrategy`, the `Backtester` legacy path, and
+the load-bearing legacy tests → re-pin goldens on the transcript. Only the
+granular tasks (`5.5`, `6.3`, `6.4`) and `1.4` (last) remain after the swap.
+
 ## 1. Instrument spine — routing and contract facts on typed instruments
 
 - [x] 1.1 Add the typed `Order` primitive (`quant/order.py`: side, quantity, instrument, venue, price context, timestamps) with canonical `to_schema`/`from_schema`; verify a schema round-trip test (spec `execution` `Typed order primitive`)
@@ -31,12 +46,12 @@ split it — never layer a parallel path.
 - [x] 3.1 Replace `StrategyProtocol` (`quant/core/protocols.py`) with the declarative surface: single author body `decide(events, portfolio)` that BOTH generates entries and evaluates the portfolio's existing positions for exits (folding the `generate_signals` + `manage_trade`/`evaluate_manage_exit` roles); reshape `TradingEngine.__init__` validation (drop the 3-method check, `INDICATOR_COLUMNS`, ticker-kwarg inspection); verify a bar-driven strategy is constructed and declarations resolve (spec `strategy-authoring` `Declarative strategy surface`)
 - [x] 3.2 Implement strategy-owned sizing + risk exits in the author body: delete `SIZING_STRATEGIES`/`SizingRegistry`/`size_for_signal`/`size_for_asset` (`quant/core/sizing.py`) and their call sites (`quant/backtest/executors/equity.py`, `quant/live/executors/unified_executor.py`); fold sizing into `decide` from instrument contract facts + the read-only Portfolio, and fold stop/take/max-hold evaluation (from the config risk fields) into `decide`'s manage pass; verify a futures strategy sizes from margin/multiplier and risk exits fire on the same conditions as the old engine (spec `strategy-authoring` `Sizing is delegated` / `Reference strategy`)
 - [x] 3.3 Build typed orders through `instrument.make_order` and submit to the venue via `decide`'s return; verify venue fills feed the Portfolio (spec `strategy-authoring` `Venue is the order seam`)
-- [ ] 3.4 Rewrite the strategy registry/loader + config validation (`quant/strategies/__init__.py`, `quant/live/strategy_loader.py`, `quant/utils/strategy_config.py`): drop `INTERVAL`/`MANAGE_INTERVAL`/`CAPITAL_PER_TRADE`/`TICKERS`/option-strike knobs; add `instruments`/`subscriptions`/`venue` declarations (keep risk/execution fields for the author); verify an unknown venue/strategy is rejected at construction and a legacy 3-method strategy is clearly rejected — no migration shim (spec `strategy-sdk` `Config validation` / `Strategy registry and dynamic loading`)
+- [x] 3.4 Rewrite the strategy registry/loader + config validation (`quant/strategies/__init__.py`, `quant/live/strategy_loader.py`, `quant/utils/strategy_config.py`): drop `INTERVAL`/`MANAGE_INTERVAL`/`CAPITAL_PER_TRADE`/`TICKERS`/option-strike knobs; add `instruments`/`subscriptions`/`venue` declarations (keep risk/execution fields for the author); verify an unknown venue/strategy is rejected at construction and a legacy 3-method strategy is clearly rejected — no migration shim (spec `strategy-sdk` `Config validation` / `Strategy registry and dynamic loading`)
 
 ## 4. Venue as the execution seam (incl. resolution, forced-close, metrics)
 
 - [x] 4.1 Reshape backtest fills into the backtest venue's execution client (`quant/venue/backtest.py`), absorbing `ExecutorRouter`/`EquityExecutor`/`BacktestExecContext` (`quant/backtest/executors/*`): fills on closed/tradable data, gated; end-of-run forced-close replaces `ExecutorRouter.force_close_remaining`; the run ledger keeps feeding `Backtester.compute_equity_curve`/`calculate_performance_metrics` (spec `execution` `Backtest fills`)
-- [ ] 4.2 Reshape the live path into the live venue's execution client (`quant/live/executors/*`, `quant/live/trader.py` loop); verify gated submission and partial-fill tracking into the position schema, with fills feeding the Portfolio (spec `execution` `Live orders through venue-bound clients`)
+- [x] 4.2 Reshape the live path into the live venue's execution client (`quant/live/executors/*`, `quant/live/trader.py` loop); verify gated submission and partial-fill tracking into the position schema, with fills feeding the Portfolio (spec `execution` `Live orders through venue-bound clients`)
 - [x] 4.3 Implement venue resolution from `config.venue`: backtester/trader resolve the declared id to a wired `Venue` (`quant/venue/_registry.py`, `BacktestVenue`/live venue with `data_source` + `execution_client`) and pass it to `process_strategy`; unknown id rejected at construction (spec `execution` `Venue resolved from the strategy declaration`)
 - [x] 4.4 Delete `ExecutorProtocol` (`should_run`, `data_end_dt`, `get_precomputed_signal`, `enter`, `exit`, lifecycle hooks, `record_run`; `quant/core/protocols.py`) and the `ExecutorRouter` asset-class dispatch; move conformance (`test_conformance_executor.py`, `test_conformance_venue.py`) onto the venue seam against both roots (spec `execution` `Executor protocol contract` / `Executor conformance for custom implementations`)
 
