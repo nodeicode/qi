@@ -15,7 +15,7 @@ Canonical model
 * **Aware time may exist only inside a handler** (parsing its inputs). It never
   crosses the boundary; the engine, executors and monitor only *read* canonical
   stamps. The single sanctioned mutation of a timestamp is
-  ``backtest/utils.calculate_fill_time`` (the ``DATA_DELAY`` simulation wall,
+  ``utils/fills.calculate_fill_time`` (the ``DATA_DELAY`` simulation wall,
   backtest-only).
 
 These helpers exist so handlers stop re-deriving ``tz_.*``/``replace(tzinfo)``

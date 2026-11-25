@@ -51,11 +51,10 @@ flowchart TB
         STEP2 -->|"active positions"| STEP3
         STEP3 -->|"exit_idx ≠ -1"| EXIT
 
-        subgraph STEP4["4. Sizing & Position"]
+        subgraph STEP4["4. Position"]
             ROUTE["route(signal) → EQUITY / OPTION / SPREAD / IC"]
-            SIZE["size_for_signal(route(signal))"]
             POS["build_position(entry_time, price, direction, ...)"]
-            ROUTE --> SIZE --> POS
+            ROUTE --> POS
         end
     end
 
@@ -90,27 +89,30 @@ DISPATCH ──EXIT──> executor.exit(s_name, pos, sig, manage_df) ──> af
 monitor.emit (async queue — never blocks)
 ```
 
-Live entry routing then splits by asset class via `engine.route(signal)`:
-
-| Asset class | Live executor path |
-|---|---|
-| IC | `IronCondorExecutor.enter/exit` — 4-leg MLEG combo, adaptive fill loops |
-| OPTION | `UnifiedExecutor._enter_option_trade` — expiry lookup → strike search → single order |
-| SPREAD | routed but **not yet implemented** (futures-spread hook) |
-| EQUITY / CRYPTO | `UnifiedExecutor._enter_linear_trade` — market/limit on symbol |
-| FUTURES | registered asset class (margin sizing) — linear single-leg via the same path, no signals yet |
+The live execution client (the live venue's `quant.venue.live.LiveExecutionClient`)
+submits every typed order the author body builds, gating on the venue session
+and reconciling (partial) fills into the shared Portfolio. The legacy per-asset
+class executor dispatch was absorbed into that one client:
 
 ## Asset Classes
 
 All asset classes flow through the same pipeline. `route(signal)` maps the signal string through the `SIGNAL_REGISTRY` (equity/option/spread/IC today; `FUTURES` / `OOF` are registered asset classes with no signals yet):
 
-| Signal | Asset Class | Sizing | Fill Model |
-|---|---|---|---|
-| `BUY`, `SELL`, `LONG`, `SHORT` | EQUITY | `size_for_signal` → EquitySizing (fraction of equity) | Slippage $/share or % factor |
-| `BUY_CALL`, `BUY_PUT`, … | OPTION | `size_for_signal` → OptionSizing (premium-based) | Volume-impact fill |
-| `BUY_SPREAD`, `SELL_SPREAD` | SPREAD | `size_for_signal` → SpreadSizing (fixed dollar) | Synthetic bid/ask + fixed $0.05 slippage |
-| `SELL_IC`, `BUY_IC` | IC | `size_for_signal` → IronCondorSizing (collateral-based) | Combo slippage + residual extrinsic + commission |
-| — (no signals yet) | FUTURES | `size_for_signal` → FuturesSizing (per-contract margin) | Linear single-leg via the unified path |
+| Signal | Asset Class | Fill Model |
+|---|---|---|
+| `BUY`, `SELL`, `LONG`, `SHORT` | EQUITY | Slippage $/share or % factor |
+| `BUY_CALL`, `BUY_PUT`, … | OPTION | Volume-impact fill |
+| `BUY_SPREAD`, `SELL_SPREAD` | SPREAD | Synthetic bid/ask + fixed $0.05 slippage |
+| `SELL_IC`, `BUY_IC` | IC | Combo slippage + residual extrinsic + commission |
+| — (no signals yet) | FUTURES | Linear single-leg via the unified path |
+
+Sizing is **strategy-owned**: the author body computes the target quantity
+from instrument contract facts (lot, multiplier, margin) and the portfolio,
+then builds the typed order via `instrument.make_order` (see `quant.strategies`
+`size_equity_lot` / `size_futures_margin`). The legacy `quant.core.sizing`
+registry (`SIZING_STRATEGIES` / `size_for_signal` / `size_for_asset`) is
+deleted; the executor fill paths size inline from the strategy's capital
+settings until venue fills take quantities from submitted orders.
 
 ## Key Methods
 
@@ -132,10 +134,9 @@ pass-through shims were removed):
 - **`inject_indicators(manage_df, signal_df, config)`** (`_utils`) — merge_asof indicator injection
 - **`call_manage_trade(strategy, position, manage_df, signal_df=None, config=None)`** (`_utils`) — inject indicators + run `manage_trade`; returns `exit_idx` (-1 = hold)
 
-### Sizing & Position (Step 4)
+### Position (Step 4)
 - **`route(signal)`** (engine) → `"EQUITY"` / `"OPTION"` / `"SPREAD"` / `"IC"` (via `SIGNAL_REGISTRY`; `FUTURES`/`OOF` additive)
 - **`direction(signal)`** (engine) → `+1` or `-1`
-- **`size_for_signal(signal, *, config, **kw)`** — `quant.core.sizing` registry dispatch by asset class; **live executors call it directly** (the old `engine.size_for_signal` shim is gone)
 - **`build_position(entry_time, entry_price, direction, signal, confidence, **extra)`** (engine)
 
 ### Helpers (`quant.core._utils` unless noted)
@@ -157,8 +158,8 @@ from quant.core.engine import TradingEngine
 engine = TradingEngine(strategy, data_handler, monitor_emit=monitor_emit)
 
 # One full tick: schedule → fetch/manage data → manage exits → entry gate →
-# dispatch EXIT/ENTRY through the executor (LiveExecutor wraps UnifiedExecutor).
-engine.process_strategy(strategy, now, executor)
+# dispatch EXIT/ENTRY through the live venue's execution client.
+engine.process_strategy(strategy, now, execution_client)
 ```
 
 ### Backtest
@@ -201,6 +202,5 @@ from quant.core._utils import (
     closed_bar_asof,
     bar_close_utc,
 )
-from quant.core.sizing import size_for_signal, size_for_asset
 from quant.observability import Span, SpanName, span_key, SLO_SPAN_KEYS
 ```

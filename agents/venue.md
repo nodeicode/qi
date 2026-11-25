@@ -27,6 +27,12 @@ code unchanged.
    or returns a closure, the venue falls back to documented default hours with
    a log. Live venues treat an unknown day as closed-and-defaults; the backtest
    venue's simulation timeline is open-by-config.
+5. **The order seam is typed orders in, fills out.** ``execution_client``
+   accepts the typed ``Order`` the author body builds via
+   ``instrument.make_order`` (``ExecutionClientProtocol.submit``) and reports
+   a ``Fill``; a reported fill feeds the Portfolio the strategy reads. The
+   strategy never holds a broker object — only the venue declaration and its
+   typed seams.
 5. **Rollover recomputes.** Session state re-resolves per date; a query after
    date rollover refreshes open/close/forced-close from the calendar rather
    than reusing a cached previous-day window.
@@ -35,8 +41,8 @@ code unchanged.
 
 | Path | Responsibility |
 |---|---|
-| `quant/src/quant/venue/base.py` | `Venue` / `CalendarProtocol` / `DataSourceProtocol` protocols, `BaseVenue` (session resolution), `to_utc_naive`, `SessionDay` |
-| `quant/src/quant/venue/backtest.py` | `BacktestVenue` — deterministic simulation-timeline venue |
+| `quant/src/quant/venue/base.py` | `Venue` / `CalendarProtocol` / `DataSourceProtocol` / `ExecutionClientProtocol` protocols, `BaseVenue` (session resolution), `to_utc_naive`, `SessionDay` |
+| `quant/src/quant/venue/backtest.py` | `BacktestVenue` — deterministic simulation-timeline venue; `BacktestExecutionClient` — the backtest fill engine (typed-`Order` seam + run ledger + end-of-run forced-close) |
 | `quant/src/quant/venue/alpaca.py` | `AlpacaCalendar` + `AlpacaVenue` — live NY→UTC calendar + injectable data/execution |
 | `quant/src/quant/venue/_registry.py` | `register_venue` / `venue_by_name` (built-ins `alpaca`, `backtest`) |
 

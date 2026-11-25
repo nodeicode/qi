@@ -43,10 +43,13 @@ read paths are gone, and the backtest/live executors refuse non-equity
 signals loudly. What the shared pipeline still needs:
 
 - `SIGNAL_REGISTRY` and `AssetClass` (in `quant.core._utils`) — retained by
-  design: `sizing.py` and signal routing consume them, and they keep the
-  futures/options extension a pure addition.
-- `size_for_signal` with the equity sizing path; option/IC sizing classes are
-  registered but not reachable from any executor.
+  design: signal routing consumes them, and they keep the futures/options
+  extension a pure addition.
+- Sizing is strategy-owned: the author body sizes from instrument contract
+  facts + the portfolio (`quant.strategies` helpers); the engine no longer
+  dispatches sizing (`quant.core.sizing` is deleted). The executor fill
+  paths size inline from the strategy's capital settings until venue fills
+  take quantities from submitted orders.
 
 To re-add an asset class, the seam is a registered signal + an
 `ExecutorProtocol` implementor — the engine pipeline itself does not change.
@@ -57,7 +60,7 @@ To re-add an asset class, the seam is a registered signal + an
 |---|---|
 | Signal pipeline (indicators → signals → cache) | `run_signals` / `cache_signals` (engine) |
 | Manage exits (`manage_trade` + injected indicators) | `evaluate_manage_exit` (`core._utils`) |
-| Entry gating / sizing / canonical request | `check_entry_gate` / `size_for_signal` / `build_position` |
+| Entry gating / canonical request | `check_entry_gate` / `build_position` |
 | Position lifecycle (group-4 primitive) | `position_from_request` → `quant.portfolio.Position` |
 | Environment boundary | `ExecutorProtocol` (live trader / backtest router) |
 

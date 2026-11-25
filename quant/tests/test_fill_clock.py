@@ -2,28 +2,12 @@
 
 from __future__ import annotations
 
-import logging
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 import pandas as pd
 
-from quant.backtest.executors import BacktestExecContext, ExecutorRouter
-from quant.backtest.utils import calculate_fill_time
+from quant.utils.fills import calculate_fill_time
 from quant.utils.time import calculate_entry_time, et_wall_to_utc_naive
-
-
-def _router(cfg) -> ExecutorRouter:
-    """Minimal router for ``data_end_dt`` (manage-window cutoff) checks."""
-    ctx = BacktestExecContext(
-        config=cfg,
-        engine=MagicMock(),
-        ticker="SPY",
-        logger=logging.getLogger("test_fill_clock"),
-        df_signals=pd.DataFrame(),
-        df_manage=pd.DataFrame(),
-    )
-    return ExecutorRouter(ctx)
 
 
 def _manage_fill(bar_ts, cfg, *, interval: str | None = None):
@@ -60,20 +44,6 @@ def test_calculate_fill_time_zero_delay_equals_entry():
 def test_calculate_fill_time_ignores_delay_on_daily():
     sig = pd.Timestamp("2024-06-03")
     assert calculate_fill_time(sig, "1d", 15) == calculate_entry_time(sig, "1d")
-
-
-def test_router_data_end_dt_is_undelayed_bar_close():
-    """Manage cutoff is T+I; fill clock (T+I+DATA_DELAY) is separate."""
-    cfg = SimpleNamespace(INTERVAL="15m", MANAGE_INTERVAL="15m", DATA_DELAY=15)
-    router = _router(cfg)
-
-    sig = et_wall_to_utc_naive(pd.Timestamp("2024-06-03").date(), 9, 45)
-    assert router.data_end_dt(sig) == et_wall_to_utc_naive(
-        pd.Timestamp("2024-06-03").date(), 10, 0
-    )
-    entry_time = calculate_fill_time(sig, cfg.INTERVAL, cfg.DATA_DELAY)
-    assert entry_time == et_wall_to_utc_naive(pd.Timestamp("2024-06-03").date(), 10, 15)
-    assert _manage_fill(sig, cfg, interval="15m") == entry_time
 
 
 def test_exit_uses_same_fill_method_on_manage_bar():

@@ -1,9 +1,11 @@
 """Auxiliary executable for the two-process determinism test.
 
 Runs the offline equity backtest once and prints a canonical JSON fingerprint
-(trades + equity curve). ``test_determinism_two_process.py`` launches this in
-two *separate interpreter processes* and asserts identical output — proving the
-engine's decision sequence depends only on its inputs, not on process state
+(trades + equity curve + the engine's decision transcript). The decision
+transcript is the deterministic (event stream + author body + venue) record the
+reshaped ``TradingEngine`` writes; ``test_determinism_two_process.py`` launches
+this file in two *separate interpreter processes* and asserts identical output —
+proving the decision sequence depends only on its inputs, not on process state
 (random seeds, env, iteration order, wall clock).
 
 Run directly: ``python quant/tests/backtest/_replay_runner.py``
@@ -48,6 +50,7 @@ def run_once() -> dict:
     )
     trades = bt.run_backtest()
     bt.compute_equity_curve()
+    transcript = bt.engine.transcript
 
     def _iso(v) -> str:
         return pd.Timestamp(v).isoformat()
@@ -59,8 +62,9 @@ def run_once() -> dict:
         ],
         "equity_curve": [[_iso(ts), float(val)] for ts, val in bt.equity_curve.items()],
         "final_equity": float(bt.equity_curve.iloc[-1]),
+        "transcript": transcript,
     }
 
 
 if __name__ == "__main__":
-    print(json.dumps(run_once(), sort_keys=True))
+    print(json.dumps(run_once(), sort_keys=True, default=str))

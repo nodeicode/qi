@@ -60,6 +60,24 @@ def mock_monitor(request: pytest.FixtureRequest):
         yield mock_emit
 
 
+def always_open_venue():
+    """A live venue whose session is always open (trader tests that submit).
+
+    The reshaped trader gates submission on the venue's session; tests that
+    drive a real order through the venue replace the constructed venue with
+    this stub so the market-open gate never blocks the asserted submit. Return
+    a fresh namespace per call so each trader construction is isolated.
+    """
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        id="alpaca",
+        is_open_at=lambda now: True,
+        allows_entry_at=lambda now: True,
+        session_for=lambda now: None,
+    )
+
+
 @pytest.fixture(autouse=True)
 def _mock_aws_and_env(monkeypatch):
     """Pin the trader to the zero-AWS local-first config backend in every test.

@@ -22,7 +22,7 @@
     ],
     [
       "2024-01-09T00:00:00",
-      9995.5
+      9991.0
     ],
     [
       "2024-01-10T00:00:00",
@@ -30,215 +30,1022 @@
     ],
     [
       "2024-01-11T00:00:00",
-      10004.5
-    ],
-    [
-      "2024-01-12T00:00:00",
       10009.0
     ],
     [
+      "2024-01-12T00:00:00",
+      10018.0
+    ],
+    [
       "2024-01-15T00:00:00",
-      10013.5
+      10027.0
     ],
     [
       "2024-01-16T00:00:00",
-      10013.761467889908
+      10036.0
     ],
     [
       "2024-01-17T00:00:00",
-      10013.761467889908
+      10045.0
     ],
     [
       "2024-01-18T00:00:00",
-      10009.761467889908
+      10063.0
     ],
     [
       "2024-01-19T00:00:00",
-      10013.761467889908
+      10058.5
     ],
     [
       "2024-01-22T00:00:00",
-      10017.761467889908
+      10063.0
     ],
     [
       "2024-01-23T00:00:00",
-      10021.761467889908
+      10067.5
     ],
     [
       "2024-01-24T00:00:00",
-      10025.761467889908
+      10072.0
     ],
     [
       "2024-01-25T00:00:00",
-      10027.094801223242
+      10076.5
     ],
     [
       "2024-01-26T00:00:00",
-      10027.094801223242
+      10081.0
     ],
     [
       "2024-01-29T00:00:00",
-      10027.094801223242
+      10085.5
     ],
     [
       "2024-01-30T00:00:00",
-      10027.094801223242
+      10094.5
     ],
     [
       "2024-01-31T00:00:00",
-      10027.094801223242
+      10094.5
     ],
     [
       "2024-02-01T00:00:00",
-      10027.094801223242
+      10094.5
     ],
     [
       "2024-02-02T00:00:00",
-      10027.094801223242
+      10094.5
     ],
     [
       "2024-02-05T00:00:00",
-      10027.094801223242
+      10094.5
     ],
     [
       "2024-02-06T00:00:00",
-      10027.094801223242
+      10094.5
     ],
     [
       "2024-02-07T00:00:00",
-      10023.094801223242
+      10094.5
     ],
     [
       "2024-02-08T00:00:00",
-      10027.094801223242
+      10090.5
     ],
     [
       "2024-02-09T00:00:00",
-      10031.094801223242
+      10094.5
     ],
     [
       "2024-02-12T00:00:00",
-      10035.094801223242
+      10098.5
     ],
     [
       "2024-02-13T00:00:00",
-      10039.094801223242
+      10102.5
     ],
     [
       "2024-02-14T00:00:00",
-      10039.647102478471
+      10106.5
     ],
     [
       "2024-02-15T00:00:00",
-      10039.647102478471
+      10110.5
     ],
     [
       "2024-02-16T00:00:00",
-      10035.647102478471
+      10114.5
     ],
     [
       "2024-02-19T00:00:00",
-      10039.647102478471
+      10110.5
     ],
     [
       "2024-02-20T00:00:00",
-      10043.647102478471
+      10122.5
     ],
     [
       "2024-02-21T00:00:00",
-      10047.647102478471
+      10134.5
     ],
     [
       "2024-02-22T00:00:00",
-      10051.647102478471
+      10146.5
     ],
     [
       "2024-02-23T00:00:00",
-      10051.84222442969
+      10158.5
     ],
     [
       "2024-02-26T00:00:00",
-      10051.84222442969
+      10170.5
     ],
     [
       "2024-02-27T00:00:00",
-      10048.34222442969
+      10182.5
     ],
     [
       "2024-02-28T00:00:00",
-      10051.84222442969
+      10194.5
     ],
     [
       "2024-02-29T00:00:00",
-      10055.34222442969
+      10206.5
     ]
   ],
-  "final_equity": 10055.34222442969,
+  "final_equity": 10206.5,
   "trades": [
     {
-      "Confidence": 0.9,
-      "Contracts": 9,
+      "Confidence": 0.0,
+      "Contracts": 18.0,
       "Direction": 1,
-      "DurationMinutes": 10080.0,
+      "DurationMinutes": 12960.0,
       "EntryPrice": 109.0,
       "EntryTime": "2024-01-09T14:30:00",
-      "ExitPrice": 110.5,
-      "ExitTime": "2024-01-16T14:30:00",
-      "PnL": 13.761467889908257,
-      "Reason": "golden_test",
-      "Signal": "BUY"
+      "ExitPrice": 112.5,
+      "ExitTime": "2024-01-18T14:30:00",
+      "PnL": 63.0,
+      "Reason": "Signal",
+      "Signal": "golden_equity"
     },
     {
-      "Confidence": 0.9,
-      "Contracts": 8,
+      "Confidence": 0.0,
+      "Contracts": 9.0,
       "Direction": 1,
-      "DurationMinutes": 10080.0,
-      "EntryPrice": 112.5,
-      "EntryTime": "2024-01-18T14:30:00",
-      "ExitPrice": 114.0,
-      "ExitTime": "2024-01-25T14:30:00",
-      "PnL": 13.333333333333334,
-      "Reason": "golden_test",
-      "Signal": "BUY"
+      "DurationMinutes": 15840.0,
+      "EntryPrice": 113.0,
+      "EntryTime": "2024-01-19T14:30:00",
+      "ExitPrice": 116.5,
+      "ExitTime": "2024-01-30T14:30:00",
+      "PnL": 31.5,
+      "Reason": "Signal",
+      "Signal": "golden_equity"
     },
     {
-      "Confidence": 0.9,
-      "Contracts": 8,
+      "Confidence": 0.0,
+      "Contracts": 8.0,
       "Direction": 1,
-      "DurationMinutes": 10080.0,
-      "EntryPrice": 119.5,
-      "EntryTime": "2024-02-07T14:30:00",
-      "ExitPrice": 121.0,
-      "ExitTime": "2024-02-14T14:30:00",
-      "PnL": 12.552301255230125,
-      "Reason": "golden_test",
-      "Signal": "BUY"
+      "DurationMinutes": 15840.0,
+      "EntryPrice": 120.0,
+      "EntryTime": "2024-02-08T14:30:00",
+      "ExitPrice": 123.5,
+      "ExitTime": "2024-02-19T14:30:00",
+      "PnL": 28.0,
+      "Reason": "Signal",
+      "Signal": "golden_equity"
     },
     {
-      "Confidence": 0.9,
-      "Contracts": 8,
+      "Confidence": 0.0,
+      "Contracts": 24.0,
       "Direction": 1,
-      "DurationMinutes": 10080.0,
-      "EntryPrice": 123.0,
-      "EntryTime": "2024-02-16T14:30:00",
-      "ExitPrice": 124.5,
-      "ExitTime": "2024-02-23T14:30:00",
-      "PnL": 12.195121951219512,
-      "Reason": "golden_test",
-      "Signal": "BUY"
-    },
-    {
-      "Confidence": 0.9,
-      "Contracts": 7,
-      "Direction": 1,
-      "DurationMinutes": 4320.0,
-      "EntryPrice": 126.5,
-      "EntryTime": "2024-02-27T14:30:00",
+      "DurationMinutes": 13530.0,
+      "EntryPrice": 123.5,
+      "EntryTime": "2024-02-19T14:30:00",
       "ExitPrice": 127.0,
-      "ExitTime": "2024-03-01T14:30:00",
-      "PnL": 3.952569169960474,
-      "Reason": "golden_test",
-      "Signal": "BUY"
+      "ExitTime": "2024-02-29T00:00:00",
+      "PnL": 84.0,
+      "Reason": "Force_Close",
+      "Signal": "golden_equity"
+    }
+  ],
+  "transcript": [
+    {
+      "decisions": [],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [],
+      "now": "2024-01-02T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [],
+      "now": "2024-01-03T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [],
+      "now": "2024-01-04T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [],
+      "now": "2024-01-05T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [
+        {
+          "kind": "order",
+          "price": null,
+          "price_type": "MARKET",
+          "qty": 9.0,
+          "side": "BUY",
+          "strategy": "golden_equity",
+          "symbol": "TEST",
+          "tag": null,
+          "venue": "backtest"
+        }
+      ],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [
+        {
+          "price": 109.0,
+          "qty": 9.0,
+          "side": "buy",
+          "strategy": "golden_equity",
+          "symbol": "TEST",
+          "venue": "backtest"
+        }
+      ],
+      "now": "2024-01-08T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [
+        {
+          "kind": "order",
+          "price": null,
+          "price_type": "MARKET",
+          "qty": 9.0,
+          "side": "BUY",
+          "strategy": "golden_equity",
+          "symbol": "TEST",
+          "tag": null,
+          "venue": "backtest"
+        }
+      ],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [
+        {
+          "price": 109.5,
+          "qty": 9.0,
+          "side": "buy",
+          "strategy": "golden_equity",
+          "symbol": "TEST",
+          "venue": "backtest"
+        }
+      ],
+      "now": "2024-01-09T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [],
+      "now": "2024-01-10T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [],
+      "now": "2024-01-11T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [],
+      "now": "2024-01-12T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [],
+      "now": "2024-01-15T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [],
+      "now": "2024-01-16T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [
+        {
+          "kind": "exit",
+          "qty": 0.0,
+          "reason": "max hold",
+          "strategy": "golden_equity",
+          "symbol": "TEST"
+        }
+      ],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [
+        {
+          "price": 112.5,
+          "qty": 18.0,
+          "side": "sell",
+          "strategy": "golden_equity",
+          "symbol": "TEST",
+          "venue": "backtest"
+        }
+      ],
+      "now": "2024-01-17T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [
+        {
+          "kind": "order",
+          "price": null,
+          "price_type": "MARKET",
+          "qty": 9.0,
+          "side": "BUY",
+          "strategy": "golden_equity",
+          "symbol": "TEST",
+          "tag": null,
+          "venue": "backtest"
+        }
+      ],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [
+        {
+          "price": 113.0,
+          "qty": 9.0,
+          "side": "buy",
+          "strategy": "golden_equity",
+          "symbol": "TEST",
+          "venue": "backtest"
+        }
+      ],
+      "now": "2024-01-18T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [],
+      "now": "2024-01-19T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [],
+      "now": "2024-01-22T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [],
+      "now": "2024-01-23T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [],
+      "now": "2024-01-24T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [],
+      "now": "2024-01-25T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [],
+      "now": "2024-01-26T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [
+        {
+          "kind": "exit",
+          "qty": 0.0,
+          "reason": "max hold",
+          "strategy": "golden_equity",
+          "symbol": "TEST"
+        }
+      ],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [
+        {
+          "price": 116.5,
+          "qty": 9.0,
+          "side": "sell",
+          "strategy": "golden_equity",
+          "symbol": "TEST",
+          "venue": "backtest"
+        }
+      ],
+      "now": "2024-01-29T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [],
+      "now": "2024-01-30T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [],
+      "now": "2024-01-31T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [],
+      "now": "2024-02-01T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [],
+      "now": "2024-02-02T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [],
+      "now": "2024-02-05T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [],
+      "now": "2024-02-06T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [
+        {
+          "kind": "order",
+          "price": null,
+          "price_type": "MARKET",
+          "qty": 8.0,
+          "side": "BUY",
+          "strategy": "golden_equity",
+          "symbol": "TEST",
+          "tag": null,
+          "venue": "backtest"
+        }
+      ],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [
+        {
+          "price": 120.0,
+          "qty": 8.0,
+          "side": "buy",
+          "strategy": "golden_equity",
+          "symbol": "TEST",
+          "venue": "backtest"
+        }
+      ],
+      "now": "2024-02-07T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [],
+      "now": "2024-02-08T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [],
+      "now": "2024-02-09T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [],
+      "now": "2024-02-12T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [],
+      "now": "2024-02-13T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [],
+      "now": "2024-02-14T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [],
+      "now": "2024-02-15T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [
+        {
+          "kind": "exit",
+          "qty": 0.0,
+          "reason": "max hold",
+          "strategy": "golden_equity",
+          "symbol": "TEST"
+        },
+        {
+          "kind": "order",
+          "price": null,
+          "price_type": "MARKET",
+          "qty": 8.0,
+          "side": "BUY",
+          "strategy": "golden_equity",
+          "symbol": "TEST",
+          "tag": null,
+          "venue": "backtest"
+        }
+      ],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [
+        {
+          "price": 123.5,
+          "qty": 8.0,
+          "side": "sell",
+          "strategy": "golden_equity",
+          "symbol": "TEST",
+          "venue": "backtest"
+        },
+        {
+          "price": 123.5,
+          "qty": 8.0,
+          "side": "buy",
+          "strategy": "golden_equity",
+          "symbol": "TEST",
+          "venue": "backtest"
+        }
+      ],
+      "now": "2024-02-16T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [],
+      "now": "2024-02-19T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [],
+      "now": "2024-02-20T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [],
+      "now": "2024-02-21T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [],
+      "now": "2024-02-22T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [],
+      "now": "2024-02-23T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [
+        {
+          "kind": "order",
+          "price": null,
+          "price_type": "MARKET",
+          "qty": 8.0,
+          "side": "BUY",
+          "strategy": "golden_equity",
+          "symbol": "TEST",
+          "tag": null,
+          "venue": "backtest"
+        }
+      ],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [
+        {
+          "price": 126.5,
+          "qty": 8.0,
+          "side": "buy",
+          "strategy": "golden_equity",
+          "symbol": "TEST",
+          "venue": "backtest"
+        }
+      ],
+      "now": "2024-02-26T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [
+        {
+          "kind": "order",
+          "price": null,
+          "price_type": "MARKET",
+          "qty": 8.0,
+          "side": "BUY",
+          "strategy": "golden_equity",
+          "symbol": "TEST",
+          "tag": null,
+          "venue": "backtest"
+        }
+      ],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [
+        {
+          "price": 127.0,
+          "qty": 8.0,
+          "side": "buy",
+          "strategy": "golden_equity",
+          "symbol": "TEST",
+          "venue": "backtest"
+        }
+      ],
+      "now": "2024-02-27T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [
+        {
+          "kind": "exit",
+          "qty": 24.0,
+          "reason": "max hold",
+          "strategy": "golden_equity",
+          "symbol": "TEST"
+        }
+      ],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [
+        null
+      ],
+      "now": "2024-02-28T00:00:00",
+      "strategy": "golden_equity"
+    },
+    {
+      "decisions": [
+        {
+          "kind": "exit",
+          "qty": 24.0,
+          "reason": "max hold",
+          "strategy": "golden_equity",
+          "symbol": "TEST"
+        }
+      ],
+      "due_subscriptions": [
+        [
+          "backtest",
+          "TEST",
+          "bars",
+          "1d"
+        ]
+      ],
+      "fills": [
+        null
+      ],
+      "now": "2024-02-29T00:00:00",
+      "strategy": "golden_equity"
     }
   ]
 }

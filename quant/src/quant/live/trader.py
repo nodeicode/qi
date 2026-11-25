@@ -26,16 +26,15 @@ import threading
 import time
 from typing import Any
 
+import pandas as pd
+
 from quant.config import ConfigSync, EnvConfigSource, FileConfigSource
 from quant.core.engine import TradingEngine
-from quant.core.protocols import ExecutorProtocol
 from quant.data.data_handler import AlpacaDataHandler
 
 # -----------------------------------------------------------------------------
 # Imports
 # -----------------------------------------------------------------------------
-from quant.live.executors.live_executor import LiveExecutor
-from quant.live.executors.unified_executor import UnifiedExecutor
 from quant.live.market_schedule import MarketSchedule
 from quant.live.protocols import (
     LivePositionDict,
@@ -51,11 +50,49 @@ from quant.live.utils import (
 )
 from quant.observability import Span, SpanName
 from quant.portfolio import Portfolio
+from quant.venue import AlpacaCalendar, venue_by_name
+from quant.venue.live import FillReport, LiveExecutionClient
 
 # -----------------------------------------------------------------------------
 # Logging Setup
 # -----------------------------------------------------------------------------
 logger = setup_logging()
+
+
+def _declared_subscriptions(strategy) -> list:
+    """The strategy's declared ``(instrument, datatype, cadence)`` list.
+
+    Config is the source of truth (the declarative surface), falling back to
+    the strategy instance/class attributes for stubs and legacy test doubles.
+    """
+    config = getattr(strategy, "config", None)
+    subs = list(getattr(config, "subscriptions", None) or [])
+    if not subs:
+        subs = list(getattr(strategy, "subscriptions", None) or [])
+    return subs
+
+
+def _live_position_dict(position) -> dict:
+    """One live position schema record for an open Portfolio position.
+
+    The trader persists open positions in the legacy live dict shape
+    (``Strategy``/``Ticker``/``Qty``/``Env``/``OrderId``) so recovery keeps
+    validating through ``is_live_position``; ``Env`` defaults to the paper
+    bucket for positions whose venue did not record one. Fills remain the
+    source of truth in the Portfolio — this dict is a mirror, not a store.
+    """
+    return {
+        "Strategy": position.strategy,
+        "Ticker": position.symbol,
+        "Qty": float(position.qty),
+        "Env": getattr(position, "env", "paper"),
+        "OrderId": (position.order_ids[0] if position.order_ids else ""),
+        "EntryPrice": float(position.avg_price),
+        "Direction": int(position.direction),
+        "EntryTime": pd.Timestamp(position.entry_time).isoformat()
+        if position.entry_time is not None
+        else "",
+    }
 
 
 def cleanup():
@@ -172,7 +209,16 @@ class UnifiedTrader:
         else:
             self.logger.info("[MONITOR] disabled (set MONITOR=1 to enable)")
 
-        # Centralized TradingEngine per strategy (shared logic with backtester)
+        # Live portfolio (spec `portfolio`): aggregates fills from venue
+        # execution through the same Position machinery as backtest. Snapshot
+        # persisted + recovered alongside the trader state (see _save_state).
+        # Created before the engines so every engine can be wired to the same
+        # account immediately.
+        self.portfolio = Portfolio(name="live")
+
+        # Centralized TradingEngine per strategy (shared logic with backtester).
+        # Each engine is wired to the same live Portfolio so the author body's
+        # injected read-only view reflects this account's real fills.
         self.engines: dict[str, TradingEngine] = {
             s.name: TradingEngine(
                 s,
@@ -181,20 +227,8 @@ class UnifiedTrader:
             )
             for s in self.strategies
         }
-
-        # Live portfolio (spec `portfolio`): aggregates fills from venue
-        # execution through the same Position machinery as backtest. Snapshot
-        # persisted + recovered alongside the trader state (see _save_state).
-        self.portfolio = Portfolio(name="live")
-
-        # Initialize Unified Executor
-        # Pass all registered clients so each account's equity is tracked independently.
-        self.unified_executor = UnifiedExecutor(
-            self.data_handler.clients,
-            self.data_handler,
-            self.logger,
-            portfolio=self.portfolio,
-        )
+        for _e in self.engines.values():
+            _e.portfolio = self.portfolio
 
         # Sync Trading Clients (Paper and Live)
         self.clients = self.data_handler.clients
@@ -204,18 +238,62 @@ class UnifiedTrader:
 
         # State Management
         self.STATE_FILE = "trader_state.json"
+        # Live position bookkeeping (persisted): entries are the legacy live
+        # position schema (``Strategy``/``Ticker``/``Qty``/``Env``/``OrderId``),
+        # synced from the Portfolio's open positions after every tick. The
+        # Portfolio snapshot is the authoritative account state; this dict is
+        # the broker-facing view kept for recovery + the offline-expiry purge.
         self.active_positions: dict[str, list[LivePositionDict]] = {
             s.name: [] for s in self.strategies
         }
-        self.last_update: dict[str, datetime.datetime] = {}
-        # Separate de-dup timer for MANAGE_INTERVAL exit checks so that
-        # exits are evaluated every MANAGE_INTERVAL even when INTERVAL is 1d.
-        self.last_manage_update: dict[str, datetime.datetime] = {}
-
-        self._load_local_state()
 
         # RLock guards shared state accessed from process_strategy worker threads.
         self.lock = threading.RLock()
+
+        self._load_local_state()
+
+        # Live venue + execution client (spec `execution` Live orders through
+        # venue-bound clients / Venue resolved from the strategy declaration):
+        # the venue is the broker-and-session unit, resolved by id from the
+        # strategies' declarations (default ``alpaca`` — the live venue) so an
+        # unknown/conflicting declared id fails loudly at construction. The
+        # calendar wraps the first trading client and the venue fails closed
+        # when the calendar can't answer. The execution client is the single
+        # gated/submission-and-reconcile seam the shared engine loop dispatches
+        # to, wired onto the venue once built.
+        # Only a concrete non-empty *string* declaration is a real venue id; a
+        # mock/absent attribute falls back to the shared live venue so tests
+        # with stub strategies still resolve ``alpaca``.
+        _declared_venues = {
+            v
+            for s in self.strategies
+            for v in [
+                getattr(s, "venue", "")
+                or getattr(getattr(s, "config", None), "venue", "")
+            ]
+            if isinstance(v, str) and v
+        }
+        if len(_declared_venues) > 1:
+            raise ValueError(
+                "live strategies declare conflicting venues: "
+                f"{sorted(_declared_venues)}"
+            )
+        self.venue = venue_by_name(
+            next(iter(_declared_venues), "alpaca"),
+            data_source=self.data_handler,
+            calendar=AlpacaCalendar(next(iter(self.clients.values()), None)),
+        )
+        self.execution_client = LiveExecutionClient(
+            venue=self.venue,
+            clients=self.clients,
+            strategies=self.strategies,
+            portfolio=self.portfolio,
+            logger=self.logger,
+            lock=self.lock,
+            # Reconcile fills from the broker's async order surface.
+            fill_resolver=self._broker_fill_resolver,
+        )
+        self.venue.execution_client = self.execution_client
 
         # Purge any IC positions that expired while the trader was offline.
         self._cleanup_expired_positions()
@@ -297,23 +375,20 @@ class UnifiedTrader:
         for name in removed:
             self.strategies = [s for s in self.strategies if s.name != name]
             self.engines.pop(name, None)
-            self.last_update.pop(name, None)
-            self.last_manage_update.pop(name, None)
             self.logger.info(f"[ConfigSync] {name}: removed.")
 
         for name in added:
             instance = new_instances[name]
             self.strategies.append(instance)
-            self.engines[name] = TradingEngine(
+            engine = TradingEngine(
                 instance,
                 self.data_handler,
                 monitor_emit=self._monitor_emit,
             )
+            engine.portfolio = self.portfolio
+            self.engines[name] = engine
             # preserve any orphaned active positions
             self.active_positions.setdefault(name, [])
-            # clean last_update and last_manage_update to avoid processing with stale timestamps
-            self.last_update.pop(name, None)
-            self.last_manage_update.pop(name, None)
             self.logger.info(f"[ConfigSync] {name}: added.")
 
         for name in kept:
@@ -397,10 +472,6 @@ class UnifiedTrader:
             self.STATE_FILE,
             {
                 "active_positions": self.active_positions,
-                "last_update": {k: v.isoformat() for k, v in self.last_update.items()},
-                "last_manage_update": {
-                    k: v.isoformat() for k, v in self.last_manage_update.items()
-                },
                 # portfolio snapshot (spec `portfolio` recovery): open + settled
                 # positions and account state, restored on restart.
                 "portfolio": self.portfolio.to_snapshot(),
@@ -448,11 +519,47 @@ class UnifiedTrader:
                     )
             self.active_positions[s_name] = restored
 
-        # Restore timestamps
-        for k, v in state.get("last_update", {}).items():
-            self.last_update[k] = datetime.datetime.fromisoformat(v)
-        for k, v in state.get("last_manage_update", {}).items():
-            self.last_manage_update[k] = datetime.datetime.fromisoformat(v)
+    @staticmethod
+    def _broker_fill_resolver(order_id: str, order, client) -> FillReport:
+        """Reconcile a submitted order from the broker's async order surface.
+
+        Reads ``client.get_order_by_id`` and reports the venue's filled/partial
+        state. A stub/offline client (no usable status string) is treated as a
+        full fill at the resolved price — reconciliation only splits a partial
+        fill when the venue actually says so.
+        """
+        raw = None
+        get_order = getattr(client, "get_order_by_id", None)
+        if get_order is not None:
+            raw = get_order(order_id)
+        status_raw = (
+            raw.get("status") if isinstance(raw, dict) else getattr(raw, "status", None)
+        )
+        if not isinstance(status_raw, str) or not status_raw:
+            return FillReport(
+                order_id, "FILLED", order.quantity, order.quantity, 0.0, None
+            )
+
+        def _num(name: str, default: float | None) -> float | None:
+            value = raw.get(name) if isinstance(raw, dict) else getattr(raw, name, None)
+            if value is None:
+                return default
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return default
+
+        qty = _num("qty", order.quantity) or order.quantity
+        filled = _num("filled_qty", order.quantity) or order.quantity
+        avg = _num("filled_avg_price", None)
+        return FillReport(
+            order_id,
+            str(status_raw).upper(),
+            qty,
+            filled,
+            max(0.0, qty - filled),
+            avg,
+        )
 
     # -------------------------------------------------------------------------
     # Data & Strategy Execution
@@ -460,41 +567,37 @@ class UnifiedTrader:
     def process_strategy(
         self, strategy: LiveStrategyProtocol, now: datetime.datetime
     ) -> list:
-        """Delegate to ``engine.process_strategy`` via ``LiveExecutor``.
+        """Delegate to ``engine.process_strategy`` via the live venue.
 
-        Scheduling, data fetching, signal generation, and order execution
-        all happen inside this call through the executor hooks.
-
-        Exceptions are caught here so that one broken strategy cannot prevent
-        others from running in the same tick.  The per-future try/except in
-        ``run()`` acts as a secondary safety net for any exception that escapes
-        this handler.
-
-        ``now`` is canonicalised to tz-naive UTC (the engine's contract) before
-        delegation; aware callers (and production ``run()``) are normalized here.
+        Scheduling, data serving, the author body, and order execution all
+        happen inside this call through the shared engine → venue path (gated
+        submission + fill reconciliation into the Portfolio). ``now`` is
+        canonicalised to tz-naive UTC (the engine's contract) before
+        delegation; aware callers (and production ``run()``) are normalized
+        here. Exceptions are caught here so that one broken strategy cannot
+        prevent others from running in the same tick; the per-future try/except
+        in ``run()`` acts as a secondary safety net.
         """
-        if now.tzinfo is not None:
+        if getattr(now, "tzinfo", None) is not None:
             now = now.astimezone(datetime.UTC).replace(tzinfo=None)
         try:
             engine = self.engines[strategy.name]
-            delay = getattr(strategy.config, "DATA_DELAY", _LIVE_DATA_DELAY_MINUTES)
-            executor: ExecutorProtocol = LiveExecutor(
-                last_update=self.last_update,
-                last_manage_update=self.last_manage_update,
-                active_positions=self.active_positions,
-                strategies=self.strategies,
-                clients=self.clients,
-                unified_executor=self.unified_executor,
-                lock=self.lock,
-                logger=self.logger,
-                save_state=self._save_state,
-                delay_minutes=int(delay),
-            )
-            engine.process_strategy(strategy, now, executor)
+            # Hand the resolved (wired) venue, not the bare execution client,
+            # to ``process_strategy``; the engine drives the venue's execution
+            # client as the fill seam (spec `execution` Venue resolved from the
+            # strategy declaration).
+            engine.process_strategy(strategy, now, self.venue)
         except Exception as e:
             self.logger.exception(
                 f"[{getattr(strategy, 'name', '?')}] Unhandled error in strategy runner: {e}"
             )
+        finally:
+            # Live position bookkeeping: mirror the Portfolio's open positions
+            # for this strategy into the persisted broker-facing schema.
+            self.active_positions[strategy.name] = [
+                _live_position_dict(p)
+                for p in self.portfolio.open_positions(strategy.name)
+            ]
         return []
 
     def _process_strategy_timed(
@@ -537,20 +640,25 @@ class UnifiedTrader:
     def _desired_bar_stream(self) -> tuple[list[str], str | None]:
         """Desired (tickers, interval) from the current strategy basket.
 
-        Tickers = union of configured TICKERS. Interval = first strategy
-        interval the aggregator supports (1m/5m/15m/30m/1h). Strategies with
-        other intervals (e.g. 1d, or 2h/4h) keep the existing HTTP/cache path.
-        Returns (tickers, None) when nothing is streamable.
+        Tickers = union of the declared bar subscriptions' instrument symbols;
+        interval = first declared cadence the aggregator supports
+        (1m/5m/15m/30m/1h). Strategies with other cadences (e.g. 1d, or 2h/4h)
+        keep the existing HTTP/cache path. Returns (tickers, None) when nothing
+        is streamable.
         """
         tickers = sorted(
             {
-                str(t).upper()
+                str(sub.instrument.symbol).upper()
                 for s in self.strategies
-                for t in (getattr(s.config, "TICKERS", None) or [])
+                for sub in _declared_subscriptions(s)
             }
         )
         intervals = sorted(
-            {str(getattr(s.config, "INTERVAL", "15m")).lower() for s in self.strategies}
+            {
+                str(sub.cadence).lower()
+                for s in self.strategies
+                for sub in _declared_subscriptions(s)
+            }
         )
         supported = [i for i in intervals if i in self._AGG_INTERVALS]
         return tickers, (supported[0] if supported else None)

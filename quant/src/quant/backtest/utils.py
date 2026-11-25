@@ -1,42 +1,12 @@
 from __future__ import annotations
 
-import datetime
 import logging
 
 import numpy as np
 import pandas as pd
 import scipy.stats as ss
 
-from quant.utils.strategy_config import BaseStrategyConfig
-from quant.utils.time import _INTRADAY_HOUR, _INTRADAY_MINUTE, calculate_entry_time
-
 logger = logging.getLogger(__name__)
-
-
-def calculate_fill_time(
-    signal_timestamp,
-    interval: str,
-    data_delay_min: int = 0,
-) -> pd.Timestamp:
-    """Live-parity fill clock: bar close + feed delay for intraday bars.
-
-    Used for both entry and exit fills.  Example (example_equity): manage/signal
-    bar stamped ``T``, interval ``15m``, ``DATA_DELAY=15`` → fill at ``T+30m``
-    wall (bar closes at ``T+15``, then SIP delay).  Entry: ``09:45`` → ``10:15``
-    ET.  Exit: same rule on the manage bar that triggered the exit.
-    """
-    entry = calculate_entry_time(signal_timestamp, interval)
-    delay = max(0, int(data_delay_min or 0))
-
-    # TODO: why naive?
-    if entry.tzinfo is not None:
-        entry = entry.tz_convert("UTC").tz_localize(None)
-
-    if delay <= 0:
-        return entry
-    if interval in _INTRADAY_MINUTE or interval in _INTRADAY_HOUR:
-        return pd.Timestamp(entry) + datetime.timedelta(minutes=delay)
-    return entry
 
 
 def calculate_deflated_sharpe_ratio(returns, strategies_tested=100):
@@ -356,23 +326,3 @@ def apply_breach_exit_cbbo(
         exit_bar_ts[ln] = f"S_breach={S_exit:.2f}"
 
     return exit_bids, exit_asks, missed
-
-
-def apply_slippage(
-    config: BaseStrategyConfig,
-    raw_price: float,
-    direction: int,
-    is_entry: bool,
-) -> float:
-    """Apply entry or exit slippage to a raw fill price."""
-    # ``SLIPPAGE_PER_SHARE`` is an optional strategy extension; the base
-    # config guarantees the factor fallback but intentionally does not require
-    # every strategy to declare a per-share override.
-    slippage_ps = float(getattr(config, "SLIPPAGE_PER_SHARE", 0.0))
-    slippage_fac = float(config.BASE_SLIPPAGE_FACTOR)
-    sign = direction if is_entry else -direction
-    if slippage_ps > 0:
-        return raw_price + slippage_ps * sign
-    if slippage_fac > 0:
-        return raw_price * (1.0 + slippage_fac * sign)
-    return raw_price

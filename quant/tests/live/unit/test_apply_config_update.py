@@ -113,32 +113,6 @@ class TestRemoved:
             {"Ticker": "SPY", "OrderId": "x"}
         ]
 
-    def test_caches_and_timestamps_cleared_on_removal(self) -> None:
-        """Removed strategy's scheduling timestamps are purged
-        so a future re-add starts with a clean slate."""
-        import datetime
-
-        s = _make_strategy("foo_paper")
-        trader = _make_trader([s])
-        # Simulate populated timestamps.
-        trader.last_update["foo_paper"] = datetime.datetime(
-            2025, 1, 1, tzinfo=datetime.UTC
-        )
-        trader.last_manage_update["foo_paper"] = datetime.datetime(
-            2025, 1, 1, tzinfo=datetime.UTC
-        )
-
-        with patch("quant.live.trader.load_strategies", return_value=[]):
-            trader._apply_config_update({"strategies": []})
-
-        assert "foo_paper" not in trader.last_update
-        assert "foo_paper" not in trader.last_manage_update
-
-
-# ===========================================================================
-# Added strategies
-# ===========================================================================
-
 
 class TestAdded:
     def test_added_strategy_wired_into_all_state_dicts(self) -> None:
@@ -180,37 +154,6 @@ class TestAdded:
 
         assert "foo_paper" in trader.engines
         assert id(trader.engines["foo_paper"]) != old_engine_id
-
-    def test_added_strategy_clears_stale_scheduling_timestamps(self) -> None:
-        import datetime
-
-        existing = _make_strategy("foo_paper")
-        trader = _make_trader([existing])
-        # Simulate stale timestamps from a prior session of "bar_paper".
-        stale = datetime.datetime(2020, 1, 1, tzinfo=datetime.UTC)
-        trader.last_update["bar_paper"] = stale
-        trader.last_manage_update["bar_paper"] = stale
-
-        new_instance = _make_strategy("bar_paper")
-        with patch(
-            "quant.live.trader.load_strategies", return_value=[existing, new_instance]
-        ):
-            trader._apply_config_update(
-                {
-                    "strategies": [
-                        {"name": "foo", "config": {}},
-                        {"name": "bar", "config": {}},
-                    ]
-                }
-            )
-
-        assert "bar_paper" not in trader.last_update
-        assert "bar_paper" not in trader.last_manage_update
-
-
-# ===========================================================================
-# Overrides on kept strategies
-# ===========================================================================
 
 
 class TestOverrides:

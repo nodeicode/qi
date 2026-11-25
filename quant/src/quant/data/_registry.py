@@ -11,21 +11,76 @@ available names.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from importlib.metadata import entry_points
 from typing import Any
+
+from quant.data.subscription import Subscription
 
 # Entry-point group under which plugin distributions register data sources.
 DATASOURCE_ENTRY_POINT_GROUP = "quant.datasources"
 
 _REGISTRY: dict[str, Callable[..., Any]] = {}
+# Declared subscription offers per registered source (name -> set of keys).
+# Offer keys are the canonical ``(venue, symbol, datatype, cadence)`` tuples.
+_OFFERS: dict[str, set[tuple]] = {}
 
 
-def register_datasource(name: str, factory: Callable[..., Any]) -> None:
-    """Register (or override) a named data source factory."""
+def _offer_keys(offers: Iterable[Any]) -> set[tuple]:
+    """Normalize declared offers into canonical subscription keys."""
+    keys: set[tuple] = set()
+    for offer in offers:
+        if isinstance(offer, Subscription):
+            keys.add(offer.key())
+        elif isinstance(offer, tuple) and len(offer) == 4:
+            keys.add(tuple(offer))
+        else:
+            raise ValueError(
+                "offers must be Subscription objects or (venue, symbol, datatype, cadence) tuples"
+            )
+    return keys
+
+
+def register_datasource(
+    name: str, factory: Callable[..., Any], *, offers: Iterable[Any] = ()
+) -> None:
+    """Register (or override) a named data source factory.
+
+    ``offers`` declares the ``(instrument, datatype, cadence)`` subscriptions
+    this source can fulfill, enabling discovery by capability via
+    :func:`find_sources`. Empty offers leaves the source resolvable by name
+    but not discoverable by subscription.
+    """
     if not isinstance(name, str) or not name:
         raise ValueError("data-source name must be a non-empty string")
     _REGISTRY[name] = factory
+    _OFFERS[name] = _offer_keys(offers)
+
+
+def datasource_offers(handler: Any) -> set[tuple]:
+    """Read a handler instance's declared subscription offers.
+
+    A source declares its capabilities either as a callable ``offers()``
+    returning an iterable of ``Subscription``/keys, or as an ``offers``
+    attribute. A handler without offers exposes nothing (empty set).
+    """
+    declared = getattr(handler, "offers", None)
+    if declared is None:
+        return set()
+    if callable(declared):
+        declared = declared()
+    return _offer_keys(declared)
+
+
+def find_sources(subscription: Subscription) -> list[str]:
+    """Return registered source names whose offers include *subscription*.
+
+    Built-ins (``backtest`` / ``alpaca``) ship every ``bars`` subscription and
+    are resolvable by name directly; capability discovery applies to custom
+    sources that declare typed offers.
+    """
+    key = subscription.key()
+    return sorted(name for name, offers in _OFFERS.items() if key in offers)
 
 
 def _builtin(name: str) -> Callable[..., Any] | None:

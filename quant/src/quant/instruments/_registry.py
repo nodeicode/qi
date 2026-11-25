@@ -74,6 +74,32 @@ def validate_instrument(inst: Instrument) -> list[str]:
             problems.append("option.option_kind is missing")
     if isinstance(inst, FutureInstrument) and inst.multiplier is None:
         problems.append("future.multiplier is missing (point value required)")
+    # ── order-construction surface ────────────────────────────────────────
+    # An instrument must be able to build the typed Order the venue seam
+    # consumes; a definition without a working ``make_order`` is rejected at
+    # the boundary rather than surfacing mid-run.
+    make_order = getattr(inst, "make_order", None)
+    if not callable(make_order):
+        problems.append("instrument.make_order is missing")
+    else:
+        try:
+            from quant.order import Order
+
+            order = make_order("BUY", 1)
+        except Exception as exc:  # production code should not raise on a valid order
+            problems.append(f"instrument.make_order failed: {exc}")
+        else:
+            if not isinstance(order, Order):
+                problems.append(
+                    "instrument.make_order must return a typed Order, "
+                    f"got {type(order).__name__}"
+                )
+    # ── required equity contract facts ────────────────────────────────────
+    if isinstance(inst, EquityInstrument):
+        if getattr(inst, "price_precision", None) is None:
+            problems.append("equity.price_precision is missing")
+        if getattr(inst, "lot_size", None) is None:
+            problems.append("equity.lot_size is missing")
     return problems
 
 

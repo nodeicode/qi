@@ -23,6 +23,7 @@ import pandas as pd
 
 from quant.core._utils import _trim_incomplete_daily_bar
 from quant.data._times import assert_canonical_index, parse_naive_utc
+from quant.data.subscription import Datatype, Subscription, normalize_bars_frame
 from quant.utils.time import closed_bar_asof
 
 
@@ -40,6 +41,11 @@ class BacktestDataHandler:
         Interval string matching ``strategy.config.INTERVAL``.
     manage_interval
         Interval string matching ``strategy.config.MANAGE_INTERVAL``.
+
+    Subscription buffers: ``seed`` feeds a pre-loaded frame keyed by
+    ``(instrument, datatype, cadence)``; ``get_data`` replays from that buffer
+    (a ``searchsorted`` window — no re-parse per bar), so the backtester loads
+    each declared subscription once and the per-bar loop just consumes it.
     """
 
     def __init__(
@@ -53,6 +59,21 @@ class BacktestDataHandler:
         self._df_manage = df_manage
         self._signal_interval = signal_interval
         self._manage_interval = manage_interval
+        # Subscription-keyed replay buffers ``key -> pre-loaded frame``.
+        self._buffers: dict[tuple, pd.DataFrame] = {}
+
+    def seed(self, subscription: Subscription, frame: pd.DataFrame) -> None:
+        """Feed a pre-loaded frame under a subscription's key (replayed on reads).
+
+        Callers (``Backtester._prefetch_data``) seed each declared bars
+        subscription once; ``get_data`` then serves index windows from the
+        buffer with no re-fetch or re-parse per bar.
+        """
+        if subscription.datatype is not Datatype.BARS:
+            raise ValueError(
+                f"BacktestDataHandler seeds bars buffers only, got {subscription.datatype}"
+            )
+        self._buffers[subscription.key()] = frame if frame.empty else frame.sort_index()
 
     def get_historical_data(
         self,
@@ -78,13 +99,64 @@ class BacktestDataHandler:
         so manage/signal fetches never include the bar still open at *end*
         (``searchsorted(..., side="right")`` alone would).
         """
-        if interval == self._signal_interval:
-            df = self._df_signals
-        elif interval == self._manage_interval:
-            df = self._df_manage
-        else:
-            return pd.DataFrame()
+        df = self._frame_for_interval(interval)
+        return self._slice_window(df, start, end, interval)
 
+    def get_data(
+        self,
+        subscription: Subscription,
+        start,
+        end,
+        *,
+        use_cache: bool = True,
+        adjustment: str | None = None,
+    ) -> pd.DataFrame:
+        """Fulfill a typed bars subscription by windowing the pre-loaded frame.
+
+        A ``bars`` subscription for a cadence the backtester pre-loaded maps to
+        that frame and is served by index lookup (no re-parse per bar). A
+        cadence that was not pre-loaded — or a window outside the loaded range —
+        yields an empty stream rather than raising.
+        """
+        del use_cache, adjustment
+        if subscription.datatype is not Datatype.BARS:
+            raise ValueError(
+                f"BacktestDataHandler ships bars only, got {subscription.datatype}"
+            )
+        df = self._frame_for_subscription(subscription)
+        window = self._slice_window(df, start, end, subscription.cadence)
+        return normalize_bars_frame(window) if not window.empty else window
+
+    def _frame_for_subscription(self, subscription: Subscription) -> pd.DataFrame:
+        """Return the replay buffer for *subscription*, falling back to a frame.
+
+        A seeded buffer wins; otherwise a cadence that matches the pre-loaded
+        signal/manage frame is used. An unseeded, unmatched cadence yields an
+        empty stream (never raises).
+        """
+        buffer = self._buffers.get(subscription.key())
+        if buffer is not None:
+            return buffer
+        return self._frame_for_interval(subscription.cadence)
+
+    def _frame_for_interval(self, interval: str) -> pd.DataFrame:
+        """Return the pre-loaded frame whose cadence matches *interval* (or empty)."""
+        if interval == self._signal_interval:
+            return self._df_signals
+        if interval == self._manage_interval:
+            return self._df_manage
+        return pd.DataFrame()
+
+    def _slice_window(
+        self, df: pd.DataFrame, start, end, interval: str
+    ) -> pd.DataFrame:
+        """Return a window view of *df* for ``[start, end]``— no copy per bar.
+
+        For daily intervals trims the incomplete current bar; for intraday
+        intervals trims to ``closed_bar_asof(end, interval)`` so fetches never
+        include the still-open bar at *end*. An empty *df* short-circuits to an
+        empty stream.
+        """
         if df.empty:
             return df
 

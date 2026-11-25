@@ -220,6 +220,56 @@ class TestLoadStrategies:
 
         assert len(result) == 2
 
+    def test_legacy_three_method_strategy_is_rejected_with_no_shim(self) -> None:
+        # spec `strategy-sdk`: a legacy 3-method strategy (no ``decide``) is
+        # clearly rejected at load time, not silently migrated.
+        class LegacyThreeMethod:
+            def __init__(self) -> None:
+                self.name = "legacy"
+                self.env = ""
+                self.client_name = ""
+                self.config = _FakeConfig()
+
+            def calculate_indicators(self, df, **kw):
+                return df
+
+            def generate_signals(self, df):
+                return df
+
+            def manage_trade(self, position, df):
+                return 0
+
+        config = {"strategies": [{"name": "Legacy", "clients": ["paper"]}]}
+
+        with patch(self._PATCH) as mock_get:
+            mock_get.return_value = LegacyThreeMethod
+            result = load_strategies(config, _make_data_handler(["paper"]), _logger)
+
+        assert result == []  # rejected, no strategy produced
+
+    def test_declarative_strategy_venue_assigned_from_config(self) -> None:
+        # spec `strategy-sdk` loader: a declarative strategy has its venue
+        # assigned from ``config.venue`` (surviving any config override).
+        class Declarative:
+            def __init__(self) -> None:
+                self.name = "Declarative"
+                self.env = ""
+                self.client_name = ""
+                self.config = _FakeConfig()
+                self.config.venue = "backtest"
+
+            def decide(self, events, portfolio):
+                return []
+
+        config = {"strategies": [{"name": "Declarative", "clients": ["paper"]}]}
+
+        with patch(self._PATCH) as mock_get:
+            mock_get.return_value = Declarative
+            result = load_strategies(config, _make_data_handler(["paper"]), _logger)
+
+        assert len(result) == 1
+        assert result[0].venue == "backtest"
+
     def test_strategy_init_exception_skips_that_client(self) -> None:
         class ExplodingStrategy:
             def __init__(self) -> None:

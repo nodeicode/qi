@@ -16,6 +16,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from quant.data.subscription import Datatype, Subscription, normalize_bars_frame
+
 
 class SyntheticDataHandler:
     """Deterministic, offline bar source (no network, no keys)."""
@@ -47,3 +49,30 @@ class SyntheticDataHandler:
         s = pd.Timestamp(start)
         e = pd.Timestamp(end)
         return self._df.loc[(self._df.index >= s) & (self._df.index <= e)].copy()
+
+    def get_data(
+        self,
+        subscription: Subscription,
+        start,
+        end,
+        *,
+        use_cache: bool = True,
+        adjustment: str | None = None,
+    ) -> pd.DataFrame:
+        """Fulfill a typed bars subscription over ``[start, end]``.
+
+        The synthetic series is a single daily business-day frame, so a ``bars``
+        subscription serves the ``[start, end]`` window of that frame with the
+        canonical :data:`~quant.data.subscription.BARS_COLUMNS` shape and
+        naive-UTC normalization — the same typed shape the backtest root and
+        the live handler emit.
+        """
+        del use_cache, adjustment  # synthetic needs neither
+        if subscription.datatype is not Datatype.BARS:
+            raise ValueError(
+                f"SyntheticDataHandler ships bars only, got {subscription.datatype}"
+            )
+        s = pd.Timestamp(start)
+        e = pd.Timestamp(end)
+        window = self._df.loc[(self._df.index >= s) & (self._df.index <= e)]
+        return normalize_bars_frame(window)

@@ -41,11 +41,13 @@ construction — no forks.
 ### Wire-up points (backtest + live parity)
 
 - **Backtest**: `Backtester(..., portfolio=Portfolio(), venue="backtest")` —
-  the equity executors stream simulated fills into the optional portfolio
-  through `BacktestExecContext.portfolio`.
-- **Live**: `UnifiedExecutor(..., portfolio=portfolio)` emits fills from venue
-  entry/exit execution; `UnifiedTrader` owns a `Portfolio(name="live")` and
-  persists/restores its snapshot with the trader state.
+  the backtest venue's execution client (`quant/venue/backtest.py`) streams
+  simulated fills into the optional portfolio.
+- **Live**: the live venue's execution client
+  (`quant/venue/live.py` `LiveExecutionClient`, wired with `portfolio=`)
+  emits fills from venue entry/exit execution; `UnifiedTrader` owns a
+  `Portfolio(name="live")` and persists/restores its snapshot with the trader
+  state.
 
 ## Quickstart — the position lifecycle
 

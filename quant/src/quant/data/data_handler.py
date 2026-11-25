@@ -23,6 +23,7 @@ from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import GetOptionContractsRequest
 from dotenv import load_dotenv
 
+from quant.data.subscription import Datatype, Subscription
 from quant.data.ws import BarSource, BarWorker, MemBarsAggregator, build_bar_source
 from quant.utils.time import (
     _ET,
@@ -986,6 +987,35 @@ class AlpacaDataHandler:
 
         # Note: Cache is updated inside _fetch_api_data if use_cache is True
         return self._finalize_equity_index(df, interval)
+
+    def get_data(
+        self,
+        subscription: Subscription,
+        start,
+        end,
+        *,
+        use_cache: bool = True,
+        adjustment: str | None = None,
+    ) -> pd.DataFrame:
+        """Fulfill a typed bars subscription for ``[start, end]``.
+
+        Routes the subscription's instrument symbol and cadence into the
+        existing live fetch/cache path so a ``bars`` subscription and the
+        engine's ``get_historical_data`` path share one source of truth with
+        the same canonical column shape.
+        """
+        if subscription.datatype is not Datatype.BARS:
+            raise ValueError(
+                f"AlpacaDataHandler ships bars only, got {subscription.datatype}"
+            )
+        return self.get_historical_data(
+            ticker=subscription.instrument.symbol,
+            start=start,
+            end=end,
+            interval=subscription.cadence,
+            use_cache=use_cache,
+            adjustment=adjustment or "all",
+        )
 
     def _interval_to_schema(self, interval: str) -> str:
         """Convert interval string to Databento schema."""

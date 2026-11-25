@@ -149,3 +149,79 @@ def test_venue_by_name_resolves_builtins() -> None:
 def test_unknown_venue_rejected_with_names() -> None:
     with pytest.raises(ValueError, match="Unknown venue"):
         venue_by_name("nope")
+
+
+# ── driver resolution (spec `execution` Venue resolved from the strategy declaration) ──
+def test_backtester_rejects_unknown_venue_at_construction() -> None:
+    """The backtest driver rejects an unregistered declared venue id loudly."""
+    from dataclasses import dataclass, field
+
+    from quant.backtest.backtester import Backtester
+    from quant.utils.strategy_config import BaseStrategyConfig
+
+    @dataclass
+    class _Cfg(BaseStrategyConfig):
+        PRE_LOAD_DAYS: int = 5
+        INITIAL_CAPITAL: float = 100_000.0
+        MAX_CONCURRENT_POSITIONS: int = 1
+        STOP_LOSS_PERCENT: float = 0.05
+        TAKE_PROFIT_PERCENT: float = -1.0
+        USE_TRAIL_LOSS: bool = False
+        MAX_HOLDING_MINUTES: int = 60
+        MIN_SIGNAL_CONFIDENCE: float = 0.0
+        BASE_SLIPPAGE_FACTOR: float = 0.001
+        TICKERS: list = field(default_factory=lambda: ["SPY"])
+
+    class _Strategy:
+        name = "s"
+
+        def __init__(self) -> None:
+            self.config = _Cfg()
+            self.venue = "nope"
+
+    with pytest.raises(ValueError, match="Unknown venue 'nope'"):
+        Backtester(
+            _Cfg(),
+            _Strategy(),
+            "2024-01-02",
+            "2024-06-28",
+            "SPY",
+            data_handler=object(),
+        )
+
+
+def test_backtester_resolves_backtest_venue_with_wiring() -> None:
+    """The backtest driver resolves the default to a wired ``BacktestVenue``."""
+    from dataclasses import dataclass, field
+
+    from quant.backtest.backtester import Backtester
+    from quant.utils.strategy_config import BaseStrategyConfig
+    from quant.venue import BacktestVenue
+
+    @dataclass
+    class _Cfg(BaseStrategyConfig):
+        PRE_LOAD_DAYS: int = 5
+        INITIAL_CAPITAL: float = 100_000.0
+        MAX_CONCURRENT_POSITIONS: int = 1
+        STOP_LOSS_PERCENT: float = 0.05
+        TAKE_PROFIT_PERCENT: float = -1.0
+        USE_TRAIL_LOSS: bool = False
+        MAX_HOLDING_MINUTES: int = 60
+        MIN_SIGNAL_CONFIDENCE: float = 0.0
+        BASE_SLIPPAGE_FACTOR: float = 0.001
+        TICKERS: list = field(default_factory=lambda: ["SPY"])
+
+    strategy = type("S", (), {})()
+    strategy.config = _Cfg()
+    strategy.name = "s"
+
+    bt = Backtester(
+        _Cfg(),
+        strategy,
+        "2024-01-02",
+        "2024-06-28",
+        "SPY",
+        data_handler=object(),
+    )
+    assert isinstance(bt._venue, BacktestVenue)
+    assert bt.venue == "backtest"

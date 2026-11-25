@@ -17,6 +17,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pandas as pd
+
 _RUNNER = Path(__file__).resolve().parent / "_replay_runner.py"
 _ROOT = Path(__file__).resolve().parents[3]
 
@@ -49,5 +51,12 @@ def test_replay_matches_expected_shapes():
     assert out["trades"]  # the run actually traded
     assert len(out["equity_curve"]) >= 2
     assert out["final_equity"] > 0
-    # trades are time-ordered and reproducible
-    assert all(t["Signal"] in {"BUY", "SELL", "NEUTRAL"} for t in out["trades"])
+    # trades are time-ordered and reproducible (both stamps are ISO strings
+    # after the JSON round-trip, so parse both sides before comparing)
+    assert all(
+        pd.to_datetime(t["EntryTime"]) <= pd.to_datetime(t["ExitTime"])
+        for t in out["trades"]
+    )
+    # the reshaped engine records a deterministic decision transcript
+    assert out["transcript"]
+    assert isinstance(out["transcript"], list)
