@@ -150,7 +150,7 @@ def calculate_entry_time(signal_timestamp, interval: str) -> pd.Timestamp:
     09:30 ET → UTC-naive) is the default; session-aware variants plug in via
     :data:`quant.utils.time.SESSION_CLOCKS`.
 
-    For SIP/feed delay, prefer :func:`quant.backtest.utils.calculate_fill_time`
+    For SIP/feed delay, prefer :func:`quant.utils.fills.calculate_fill_time`
     (``T+I+DATA_DELAY``) so backtest fills match live wall when the delayed bar
     is first known.
     """

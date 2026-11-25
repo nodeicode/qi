@@ -2,9 +2,9 @@
 
 Drives the **same** deterministic synthetic equity data (``example_equity``,
 offline fixture) through BOTH the shared engine decision path
-(``TradingEngine.process_strategy`` via ``ExecutorRouter`` — the
-parity-load-bearing engine primitive) and the ``Backtester`` driver, while
-explicitly exercising every counted primitive:
+(``TradingEngine.process_strategy`` with the backtest venue's fill engine —
+the parity-load-bearing engine primitive + venue seam) and the
+``Backtester`` driver, while explicitly exercising every counted primitive:
 
 * ``quant.instruments`` — a typed ``EquityInstrument`` is resolved + validated
   for the traded ticker;
@@ -40,7 +40,6 @@ import pandas as pd
 
 from quant.backtest.backtest_data_handler import BacktestDataHandler
 from quant.backtest.backtester import Backtester
-from quant.backtest.executors.router import ExecutorRouter
 from quant.config import ConfigSync, FileConfigSource
 from quant.core.engine import TradingEngine
 from quant.core.protocols import DataHandlerProtocol
@@ -131,8 +130,8 @@ def drive_engine_path(cfg: ExampleEquityConfig, venue: BacktestVenue):
     """The engine decision path: drive ``process_strategy`` per bar directly.
 
     Reuses ``Backtester``'s proven data preparation (``prepare_signals`` /
-    ``_prefetch_data``), then **explicitly** constructs the engine +
-    ``ExecutorRouter`` and calls ``process_strategy`` on every bar — the shared
+    ``_prefetch_data``), then **explicitly** builds the backtest venue's
+    execution client and calls ``process_strategy`` on every bar — the shared
     one-pipeline entrypoint (parity-load-bearing engine primitive) — feeding
     fills into the attached ``Portfolio``. Never invokes ``run_backtest``.
     """
@@ -163,16 +162,16 @@ def drive_engine_path(cfg: ExampleEquityConfig, venue: BacktestVenue):
     bt.engine.data_handler = cast("DataHandlerProtocol", dh)
     bt.engine.cache_signals(TICKER, df_signals)
 
-    executor = ExecutorRouter(bt._build_exec_context(df_signals))
+    client = bt._build_execution_client(df_signals)
     prev = list(cfg.TICKERS)
     try:
         cfg.TICKERS = [TICKER]
         for ts, _row in df_signals.iterrows():
-            bt.engine.process_strategy(bt.strategy, cast("pd.Timestamp", ts), executor)
+            bt.engine.process_strategy(bt.strategy, cast("pd.Timestamp", ts), client)
     finally:
         cfg.TICKERS = prev
-    executor.force_close_remaining()
-    return bt, executor, pf, df_signals
+    client.force_close_remaining()
+    return bt, client, pf, df_signals
 
 
 def drive_backtest_path(cfg: ExampleEquityConfig, venue: BacktestVenue):

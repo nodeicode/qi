@@ -42,7 +42,7 @@ code unchanged.
 | Path | Responsibility |
 |---|---|
 | `quant/src/quant/venue/base.py` | `Venue` / `CalendarProtocol` / `DataSourceProtocol` / `ExecutionClientProtocol` protocols, `BaseVenue` (session resolution), `to_utc_naive`, `SessionDay` |
-| `quant/src/quant/venue/backtest.py` | `BacktestVenue` — deterministic simulation-timeline venue; `BacktestExecutionClient` — typed-`Order` → simulated-fill seam |
+| `quant/src/quant/venue/backtest.py` | `BacktestVenue` — deterministic simulation-timeline venue; `BacktestExecutionClient` — the backtest fill engine (typed-`Order` seam + run ledger + end-of-run forced-close) |
 | `quant/src/quant/venue/alpaca.py` | `AlpacaCalendar` + `AlpacaVenue` — live NY→UTC calendar + injectable data/execution |
 | `quant/src/quant/venue/_registry.py` | `register_venue` / `venue_by_name` (built-ins `alpaca`, `backtest`) |
 

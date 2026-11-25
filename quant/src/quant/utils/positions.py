@@ -1,8 +1,9 @@
 """Shared position schema and builder — leaf home in ``quant.utils``.
 
-Consumed by both the backtest executors and the live layer (``python/``) so
-``manage_trade`` always receives an identical schema.  ``quant.utils`` is a
-leaf package — this module imports nothing from ``quant.core``.
+Consumed by the backtest venue's execution client and the live layer
+(``python/``) so ``manage_trade`` always receives an identical schema.
+``quant.utils`` is a leaf package — this module imports nothing from
+``quant.core``.
 """
 
 from __future__ import annotations

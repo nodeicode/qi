@@ -112,47 +112,48 @@ print("open at 06:00:", cv.is_open_at(datetime(2024, 6, 3, 6, 0)))    # False
 PY
 ```
 
-## 4. Add an executor / asset class
+## 4. Extend the execution seam (venue execution client)
 
-Execution is the one parity-sensitive seam. In backtest, an asset-class stays
-behind `BaseBacktestExecutor` and registers in the router's default registry;
-the router is the single `ExecutorProtocol` face the engine sees.
+Execution is the one parity-sensitive seam. In backtest, fills are simulated
+by the backtest venue's execution client (`BacktestExecutionClient` in
+`quant/venue/backtest.py`) — the single fill engine the shared
+`process_strategy` loop dispatches to. A custom execution flavor subclasses
+it (or provides its own `submit(order) -> Fill | None`) and wires into a
+`BacktestVenue`:
 
 ```bash
 uv run python - <<'PY'
 import logging
+
 import pandas as pd
 
-from quant.backtest.executors.router import ExecutorRouter, DEFAULT_REGISTRY
-from quant.backtest.executors.context import BacktestExecContext
-from quant.backtest.executors.equity import EquityExecutor
-from quant.core.engine import TradingEngine
-from quant.data import SyntheticDataHandler
+from quant.order import Order
 from quant.strategies.example_equity.strategy import ExampleEquityConfig
+from quant.venue import BacktestExecutionClient, BacktestVenue
 
 cfg = ExampleEquityConfig(INTERVAL="1d", MANAGE_INTERVAL="1d")
-class TrivialStrategy:
-    name = "s"
-    def __init__(self, c): self.config = c
-    def calculate_indicators(self, df, **kw): return df
-    def generate_signals(self, df):
-        out = df.copy(); out["Signal"] = "NEUTRAL"; out["Confidence"] = 0.0
-        out["Reason"] = ""; return out
-    def manage_trade(self, p, df): return -1
 
-engine = TradingEngine(TrivialStrategy(cfg), SyntheticDataHandler())
-ctx = BacktestExecContext(config=cfg, engine=engine, ticker="SPY",
-                          logger=logging.getLogger("x"),
-                          df_signals=pd.DataFrame(), df_manage=pd.DataFrame())
+class CustomClient(BacktestExecutionClient):
+    """Custom fill logic over the typed-order seam."""
+    def submit(self, order: Order):
+        fill = super().submit(order)          # default simulated fill
+        print("custom client saw:", order.side, order.quantity,
+              fill.price if fill else None)
+        return fill
 
-router = ExecutorRouter(ctx, registry={**DEFAULT_REGISTRY, "CUSTOM": EquityExecutor})
-print("resolved executor:", type(router._resolve("CUSTOM")).__name__)  # EquityExecutor
+client = CustomClient(config=cfg, ticker="SPY",
+                      logger=logging.getLogger("x"),
+                      df_signals=pd.DataFrame(), df_manage=pd.DataFrame())
+venue = BacktestVenue(execution_client=client)
+print("venue id:", venue.id)                             # backtest
+print("execution client:", type(venue.execution_client).__name__)  # CustomClient
 PY
 ```
 
-The same story holds live: implement the shared signal path and let the venue
-feed its fills into a `Portfolio` (see `agents/portfolio.md`). Divergences
-between backtest and live are then attributable only to your executor.
+The same story holds live: reshape the live executor into the live venue's
+execution client and let the venue feed its fills into a `Portfolio` (see
+`agents/portfolio.md`). Divergences between backtest and live are then
+attributable only to the venue client.
 
 ## 5. Build on observability
 
@@ -192,7 +193,7 @@ distinct). No engine modification needed.
 | Strategy | `StrategyProtocol` + one registry / entry-point line | `quant.strategies` |
 | Data source | `DataSourceProtocol` | `quant.venue.base` |
 | Venue | `Venue` / `BaseVenue`, registered by name | `quant.venue` |
-| Executor | `BaseBacktestExecutor` (backtest) / live executor pair | `quant.backtest.executors`, `quant.live.executors` |
+| Execution client | `submit(order) -> Fill`; backtest fills simulated in `quant.venue.backtest` | `quant.venue`, `quant.live.executors` |
 | Observability | `Span` + `Emitter` | `quant.observability` |
 | Portfolio | fills-only state machine | `quant.portfolio` |
 | Config | `ConfigSource` backend, registered by name | `quant.config` |

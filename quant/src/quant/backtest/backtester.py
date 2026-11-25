@@ -1,16 +1,18 @@
 """
-Unified Backtester — environment adapter via ``ExecutorRouter``.
+Unified Backtester — environment adapter over the backtest venue.
 ================================================================
 
 Architecture:
 
   1. **Data fetch** — signal-resolution + manage-resolution bars prefetched
      upfront via ``_prefetch_data``.
-  2. **Per-bar loop** — ``engine.process_strategy(strategy, now, executor)``
-     drives scheduling, signals, manage, entry gating.  ``ExecutorRouter``
-     is the ``ExecutorProtocol`` boundary and dispatches fills by asset class.
-  3. **Fill simulation** — per-asset-class executors under
-     ``quant.backtest.executors`` (``EquityExecutor``, …) own enter/exit.
+  2. **Per-bar loop** — ``engine.process_strategy(strategy, now, client)``
+     drives scheduling, signals, manage, entry gating.  The backtest venue's
+     execution client (``BacktestExecutionClient`` in ``quant/venue/backtest.py``)
+     is the fill seam the engine loop dispatches to.
+  3. **Fill simulation** — the client owns enter/exit, the end-of-run
+     forced-close, and the run ledger (positions, trade log, running equity)
+     the equity curve and metrics read back.
 
 A single ``run_backtest`` drives everything.
 
@@ -32,20 +34,21 @@ import pandas as pd
 
 from quant.backtest.backtest_data_handler import BacktestDataHandler
 from quant.backtest.base_backtest import BaseBacktester
-from quant.backtest.executors import BacktestExecContext, ExecutorRouter
 from quant.core.engine import TradingEngine
 from quant.core.protocols import DataHandlerProtocol
 from quant.data.subscription import Datatype, Subscription
 from quant.instruments import EquityInstrument
 from quant.utils.strategy_config import BaseStrategyConfig
+from quant.venue import BacktestExecutionClient
 
 
 class Backtester(BaseBacktester):
-    """Unified backtester using ``engine.process_strategy`` via ``ExecutorRouter``.
+    """Unified backtester driving ``engine.process_strategy`` via the venue client.
 
-    ``engine.route(signal)`` selects the asset class per signal; the router
-    forwards enter/exit to the registered child executor.  EQUITY
-    are registered by default.
+    ``engine.route(signal)`` retains the legacy signal→asset-class mapping
+    until the routing swap lands; fills are simulated by the backtest venue's
+    execution client, which also owns the end-of-run forced-close and the run
+    ledger (positions, trade log, running equity).
     """
 
     def __init__(
@@ -135,8 +138,8 @@ class Backtester(BaseBacktester):
 
         1. Prepare signals (via ``engine.run_signals`` — same as live).
         2. Detect dominant asset class and prefetch manage data if needed.
-        3. Iterate signals: call ``engine.process_strategy`` per bar →
-           ``ExecutorRouter`` dispatches entries/exits by asset class.
+        3. Iterate signals: call ``engine.process_strategy`` per bar → the
+           backtest venue's execution client simulates entries/exits.
         """
         # Single prepare path for all strategies (signals + Raw_Close).
         df_signals = self.prepare_signals()
@@ -169,11 +172,18 @@ class Backtester(BaseBacktester):
     # Core loop — drives engine.process_strategy per bar
     # ==================================================================
 
-    def _build_exec_context(self, df_signals: pd.DataFrame) -> BacktestExecContext:
-        """Bundle shared state + optional prefetch bags for ``ExecutorRouter``."""
-        ctx = BacktestExecContext(
+    def _build_execution_client(
+        self, df_signals: pd.DataFrame
+    ) -> BacktestExecutionClient:
+        """Bundle the run ledger + bar frames into the backtest fill engine.
+
+        The run ledger (positions, trade log, running equity) is injected by
+        reference — the same pattern as before — so ``Backtester`` keeps its
+        own ``trade_log`` / positions attributes for the equity curve and
+        metrics, and syncs the run's equity back after ``force_close_remaining``.
+        """
+        client = BacktestExecutionClient(
             config=getattr(self.strategy, "config", self.config),
-            engine=self.engine,
             ticker=self.ticker,
             logger=self.logger,
             df_signals=df_signals,
@@ -188,14 +198,14 @@ class Backtester(BaseBacktester):
             venue=self.venue,
             update_reason_stats=self.update_reason_stats,
         )
-        return ctx
+        return client
 
     def _simulate(self, df_signals: pd.DataFrame):
         """Per-bar loop calling ``engine.process_strategy`` — full live parity.
 
-        ``ExecutorRouter`` exposes ``ExecutorProtocol`` so the engine's
-        orchestration runs identically here and in ``trader.py``.  Per-asset
-        fill simulation lives in child executors behind the router.
+        The engine's orchestration runs identically here and in ``trader.py``;
+        the backtest venue's execution client is the fill seam it dispatches
+        to, and owns the end-of-run forced-close.
         """
 
         # Engine fetches bar data via ``self.data_handler``; in backtest
@@ -237,7 +247,7 @@ class Backtester(BaseBacktester):
         # Cache full signal df for indicator injection inside call_manage_trade.
         self.engine.cache_signals(self.ticker, df_signals)
 
-        executor = ExecutorRouter(self._build_exec_context(df_signals))
+        client = self._build_execution_client(df_signals)
 
         # engine.process_strategy reads strategy.config.TICKERS — restrict
         # to the single backtest ticker for the duration of the run so
@@ -248,7 +258,7 @@ class Backtester(BaseBacktester):
             cfg.TICKERS = [self.ticker]
             for ts, _row in df_signals.iterrows():
                 ts = cast("pd.Timestamp", ts)
-                self.engine.process_strategy(self.strategy, ts, executor)
+                self.engine.process_strategy(self.strategy, ts, client)
         finally:
             if prev_tickers is None:
                 if hasattr(cfg, "TICKERS"):
@@ -260,10 +270,10 @@ class Backtester(BaseBacktester):
                 cfg.TICKERS = prev_tickers
 
         # Close positions still active at end of backtest window.
-        executor.force_close_remaining()
-        # Sync ledger back from shared context.
-        self._running_equity = executor.running_equity
-        self._collateral_in_use = executor.collateral_in_use
+        client.force_close_remaining()
+        # Sync ledger results back to the backtester.
+        self._running_equity = client.running_equity
+        self._collateral_in_use = client.collateral_in_use
 
     # ==================================================================
     # Data preparation — mirrors trader.py data fetching

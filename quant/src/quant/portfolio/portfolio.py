@@ -3,7 +3,7 @@
 A ``Portfolio`` collects the positions under its care (across strategies and
 venues), tracks account state (cash and equity), and computes portfolio-level
 realized/unrealized PnL from position state plus a pricing source. The same
-class runs in backtest (fills from simulation via ``BacktestExecContext``) and
+class runs in backtest (fills from the backtest venue's execution client) and
 live (fills from venue execution), so portfolio metrics derive from the same
 ledger fields either way — research numbers equal live numbers by construction.
 """

@@ -8,7 +8,7 @@ tz-naive-UTC stamps — no ``tz_localize`` / ``tz_convert`` /
 Allowed homes (which legitimately touch tz):
 * ``core/_utils.py``            — pure calendar readers (daily completeness,
                                  session clocks, ``closed_bar_asof`` / ``bar_close_utc``).
-* ``backtest/utils.py``         — the one sanctioned simulation mutator,
+* ``utils/fills.py``            — the one sanctioned simulation mutator,
                                  ``calculate_fill_time``.
 * ``backtest/base_backtest.py`` — metrics/reporting display normalization
                                  (daily frames may be aware per equity-session
@@ -35,7 +35,7 @@ _DISALLOWED_RELS = [
     "backtest/backtester.py",
     "backtest/base_backtest.py",
     "backtest/backtest_data_handler.py",
-    "backtest/executors",
+    "venue/backtest.py",
 ]
 
 # base_backtest.py and backtest_data_handler.py are in DISALLOWED_RELS but

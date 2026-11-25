@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from quant.backtest.utils import apply_slippage
+from quant.utils.fills import apply_slippage
 
 
 def _slippage_config(*, per_share: float = 0.0, factor: float = 0.0):

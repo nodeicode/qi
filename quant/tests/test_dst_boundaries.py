@@ -5,7 +5,7 @@ must map to the correct naive-UTC stamp across the US DST boundary.
 
 * ``utils.time.et_wall_to_utc_naive`` — pure ET-wall → naive-UTC mapping
   (10:15 ET → 14:15 UTC EDT / 15:15 UTC EST).
-* ``backtest.utils.calculate_fill_time`` — the backtest fill clock
+* ``utils.fills.calculate_fill_time`` — the backtest fill clock
   (``T + I + DATA_DELAY``) on the 09:45 ET signal bar → 10:15 ET fill:
   13:45 → 14:15 UTC (EDT) and 14:45 → 15:15 UTC (EST).
 """
@@ -17,7 +17,7 @@ import datetime
 import pandas as pd
 import pytest
 
-from quant.backtest.utils import calculate_fill_time
+from quant.utils.fills import calculate_fill_time
 from quant.utils.time import et_wall_to_utc_naive
 
 # US DST boundaries in 2023: starts Mar 12 02:00, ends Nov 05 02:00.
