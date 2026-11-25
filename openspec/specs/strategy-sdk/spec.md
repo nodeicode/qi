@@ -8,40 +8,98 @@ How a developer authors, configures, and registers a strategy so it runs identic
 
 ### Requirement: Strategy execution protocol
 
-Strategies MUST implement `StrategyProtocol`: a `config` attribute of type `BaseStrategyConfig` and three methods — `calculate_indicators(df, **kw) -> df`, `generate_signals(df) -> df`, and `manage_trade(position, df) -> int`. The engine MUST reject a strategy missing any of these at construction time with a readable `TypeError`.
+`StrategyProtocol` (`quant/core/protocols.py`) MUST be replaced by the
+declarative surface: `config: BaseStrategyConfig` whose declarations name
+the instruments, subscriptions, and venue, plus a single author body
+`decide(events, portfolio)` over typed data events + the read-only
+Portfolio, returning typed `Order`s / exit intents. The 3 method contract (`calculate_indicators` /
+`generate_signals` with string `Signal`/`Confidence`/`Reason` columns /
+`manage_trade`) MUST be removed. `TradingEngine.__init__` MUST stop checking
+the three methods and `INDICATOR_COLUMNS`/ticker-kwarg inspection and
+instead validate the declarative protocol, resolvable declarations, and a
+callable author body — a strategy missing any is rejected at construction
+with a readable error naming what is missing.
 
 #### Scenario: Missing method rejected at construction
-GIVEN a strategy class that omits `manage_trade`
-WHEN an engine is constructed with it
-THEN construction raises a `TypeError` naming the missing method
+GIVEN a strategy class that omits required declarations or the author body
+WHEN a `TradingEngine` is constructed with it
+THEN construction raises a readable error naming what is missing
 
 #### Scenario: Valid strategy accepted
-GIVEN a strategy implementing all three methods with a `BaseStrategyConfig` config
-WHEN an engine is constructed with it
-THEN construction succeeds and the strategy is callable through the shared pipeline
+GIVEN a strategy implementing the declarative surface with resolvable declarations
+WHEN a `TradingEngine` is constructed with it
+THEN construction succeeds and the strategy is callable through the shared reshaped pipeline
+
+#### Scenario: Declarative strategy satisfies the protocol
+GIVEN a strategy implementing the declarative surface
+WHEN the SDK checks it against the protocol
+THEN it satisfies construction-time checks with all declarations resolvable
+
+#### Scenario: Legacy 3-method strategy clearly rejected
+GIVEN a strategy exposing only `calculate_indicators`/`generate_signals`/`manage_trade`
+WHEN it is loaded or constructed
+THEN it is clearly rejected as legacy (no silent migration, no partial behavior)
 
 ### Requirement: Config validation
 
-Strategy config MUST subclass `BaseStrategyConfig`, whose fields drive engine behavior (intervals, tickers, data delay). An invalid config (wrong type, missing required strategy-specific field) MUST fail at strategy/engine construction with a message identifying the offending field, never silently at decision time.
+`BaseStrategyConfig` MUST drop the engine-driven fields
+(`INTERVAL`, `MANAGE_INTERVAL`, `CAPITAL_PER_TRADE`, `TICKERS`,
+`MIN_OPTION_DTE`, `MIN_SPREAD_WIDTH`, option-strike knobs) and add
+declarative ones: `instruments: list[Instrument]`,
+`subscriptions: list[Subscription]`, `venue: str`. The framework
+risk/execution fields (`INITIAL_CAPITAL`, `MAX_CONCURRENT_POSITIONS`,
+`STOP_LOSS_PERCENT`, `TAKE_PROFIT_PERCENT`, `USE_TRAIL_LOSS`,
+`MAX_HOLDING_MINUTES`, `MIN_SIGNAL_CONFIDENCE`, `BASE_SLIPPAGE_FACTOR`,
+`PRE_LOAD_DAYS`, `DATA_DELAY`) stay available to the author body.
+Validation MUST reject an unknown venue/strategy **at construction** and
+fail an invalid config or unresolvable declaration naming the offending
+field — never silently at decision time.
 
 #### Scenario: Wrong config type rejected
 GIVEN a strategy whose `config` is not a `BaseStrategyConfig` instance
-WHEN an engine is constructed with it
+WHEN a `TradingEngine` is constructed with it
 THEN construction raises a `TypeError` explaining the config contract
 
 #### Scenario: Bad field value fails construction
-GIVEN a config subclass that validates a field (e.g. interval in an allowed set)
+GIVEN a config subclass that validates a field (e.g. cadence in an allowed set)
 WHEN a strategy is constructed with an invalid value
 THEN construction raises a validation error naming the field and the accepted values
 
+#### Scenario: Unknown venue rejected at construction
+GIVEN a strategy declaring a venue id that is not registered
+WHEN the strategy/config is constructed
+THEN construction fails with a clear message
+
+#### Scenario: Declarative reference config resolves
+GIVEN the canonical reference config for `example_equity`:
+`instruments=[EquityInstrument("SPY", contract=EquityContract(price_precision=2, lot=1))]`,
+`subscriptions=[Subscription("SPY", Datatype.BARS, "1h")]`,
+`venue="backtest"`, plus framework fields `initial_capital=100_000.0`,
+`max_concurrent_positions=1`, `pre_load_days=60`
+WHEN the strategy/config is constructed
+THEN the instruments and subscription resolve against the data port and `quant.venue`, and construction succeeds
+
+#### Scenario: Unknown strategy rejected at construction
+GIVEN a loader request for an unregistered strategy
+WHEN it is loaded
+THEN construction fails loudly
+
 ### Requirement: Strategy registry and dynamic loading
 
-Strategies MUST be loadable by name through `get_strategy(name)`, resolving from a built-in registry (the public `example_equity`) and from any registered entry-point group. Unknown names MUST raise a `ValueError` listing available names. A live config that names an unknown strategy MUST be rejected at load time without stopping other strategies.
+`quant/strategies/__init__.py` MUST keep its shape — `STRATEGY_REGISTRY`,
+`get_strategy`, `_entry_point_strategy`, `_available_strategies`, the
+`quant.strategies` entry-point group — with `STRATEGY_REGISTRY` resolved to
+the rewritten declarative `example_equity` and loading validating
+declarations. `quant/live/strategy_loader.py` MUST keep its per-(strategy,
+client) loop, constructing through the new validation and assigning
+`name`/`env`/`client_name`/venue. Unknown names raise a `ValueError` listing
+available names; a live config naming an unknown strategy is rejected at
+load time without stopping other strategies.
 
 #### Scenario: Built-in strategy loads by name
-GIVEN the SDK is installed with `example_equity`
+GIVEN the SDK is installed with the rewritten `example_equity`
 WHEN `get_strategy("example_equity")` is called
-THEN the example strategy class is returned
+THEN the declarative example strategy class is returned with resolvable declarations
 
 #### Scenario: Unknown name errors
 GIVEN no strategy named `nope` is registered
@@ -53,16 +111,7 @@ GIVEN another distribution registers a strategy under the SDK's strategy entry-p
 WHEN `get_strategy("<that-name>")` is called
 THEN the entry-point strategy class is returned without SDK code changes
 
-### Requirement: Indicator injection contract
-
-The engine MUST inject the strategy's indicator columns into manage/decision frames and cache signal output per ticker. Strategies may accept an optional `ticker` kwarg in `calculate_indicators` for cross-asset logic; the engine MUST call it with the ticker only when the signature supports it.
-
-#### Scenario: Indicator columns present on manage frame
-GIVEN a strategy declares `INDICATOR_COLUMNS`
-WHEN `manage_trade` is invoked
-THEN the passed frame contains those columns computed from the latest bars
-
-#### Scenario: Ticker kwarg respected
-GIVEN a strategy whose `calculate_indicators` accepts `ticker`
-WHEN the engine runs signals
-THEN it is called with the current ticker
+#### Scenario: Reference strategy loads through the new loader
+GIVEN the rewritten `example_equity`
+WHEN loaded through `quant.live.strategy_loader` / the backtest loader
+THEN it constructs with resolvable declarations in both environments
