@@ -4,8 +4,8 @@ Qi's core claim is **parity by construction**: the same decision pipeline runs
 byte-for-byte in backtest and live, so research results are truthful previews
 of live behavior. This doc explains the shape that makes that true — the one
 pipeline, the environment seam, and the closed set of primitives it composes.
-For the deeper invariants and verification detail, see `docs/correctness-layer.md`
-and `docs/roadmap.md` (the why).
+For the deeper invariants and verification detail, see
+`docs/whitepaper-backtest-live-drift.md` and `docs/evaluation-methodology.md`.
 
 ## 1. The one pipeline
 

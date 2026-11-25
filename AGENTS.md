@@ -9,8 +9,7 @@ quantitative research → backtest → paper → live. One decision pipeline
 (`quant.core.engine.process_strategy`) runs byte-for-byte identically in
 backtest and live — only the executor differs — so research results are
 truthful previews of live behavior. Qi is the public foundation cut from a
-private production superset; the plan/why is `docs/roadmap.md`, the public
-story is `README.md`.
+private production superset; the public story is `README.md`.
 
 This repo is mid-rebuild: the active contract is the OpenSpec change
 `openspec/changes/lean-quant-engine/` (primitives: venue, portfolio,
@@ -75,7 +74,7 @@ and `tasks.md` is the checklist — read both before working on the SDK shape.
 | `quant/src/quant/observability.py` | Spans (age ∥ duration) + emitter interface |
 | `quant/tests/` | The one test suite (incl. import-layering + goldens) |
 | `agents/` | Per-subsystem agent docs (invariants + extension points — see §6) |
-| `docs/` | primitives index (§5) / quickstart / extensibility / architecture / deployment / roadmap (the why) |
+| `docs/` | primitives index (§5) / quickstart / extensibility / architecture / deployment / evaluation-methodology / whitepaper-backtest-live-drift |
 | `openspec/` | Specs + the active change `openspec/changes/lean-quant-engine/` |
 
 ## 5. Closed primitives (counted set — design D11)
@@ -120,22 +119,42 @@ for the area you are changing. Links reference files in this tree (resolve-check
 **Scheduled under their owning task groups** (referenced, but not yet shipped):
 per-port conformance/extension docs (instruments, execution, backtest) land
 with their conformance suites (11.x).
-The public story is `README.md`; the why is `docs/roadmap.md`. `docs/
-extensibility.md` holds the runnable add-a-recipe examples.
+The public story is `README.md`. `docs/extensibility.md` holds the runnable
+add-a-recipe examples.
 
-## 7. Where to look next
+## 7. Comment hygiene (self-contained comments)
+
+Every comment, docstring, and inline `#` note in this repo must be fully
+**self-contained**: a reader should understand it from the words on the line
+alone, with no outside context required. Concretely:
+
+- **No plan references.** Never cite design letters, ticket numbers, or task
+  ids (e.g. "see D11", "per plan P4", "task 11.x") as the explanation for
+  code. If a design choice matters, state *what* it is and *why* in the
+  comment itself.
+- **No private names.** No references to internal team/project names, docs
+  outside this tree, or assumptions a stranger to the project would not hold.
+- **State the reason, not the number.** A link to `docs/…` / `agents/…` may
+  *supplement* an explanation but must never *replace* it — the comment alone
+  must carry the meaning.
+- **Links must resolve.** Any doc/agent reference must point to an existing
+  file in this tree.
+
+The goal: comment as if each line were read in isolation by someone who has
+never seen the plan or the surrounding project.
+
+## 8. Where to look next
 
 - `README.md` — quickstart + CLI (`uv run quant-backtest`).
 - `docs/quickstart.md` — <5-minute clone → backtest → paper, no AWS.
-- `docs/roadmap.md` — the story/plan. **Read first.**
 - `openspec/changes/lean-quant-engine/` — specs + tasks for the current rebuild.
 - Per-subsystem agent docs (`agents/*.md`) — index in §6.
 
-## 8. Definition of done
+## 9. Definition of done
 
 - [ ] Fits the OpenSpec plan; does not break an invariant in §1.
 - [ ] `uv run test` green; `ruff check .` / `ruff format .` clean.
 - [ ] No secrets added; no tracked secret paths touched.
 - [ ] README/docs updated where behavior or CLI changed.
 - [ ] Touches the live path? A test guards it, and the monitor would catch
-      divergence (see `docs/correctness-layer.md`).
+      divergence (see `docs/whitepaper-backtest-live-drift.md`).

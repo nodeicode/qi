@@ -3,7 +3,7 @@
 ### One decision pipeline for production options execution
 
 **Author:** nodeicode · **Status:** draft v1 · **Repo:** `quant-engine` (private)
-· **Companion docs:** `docs/evaluation-methodology.md`, `docs/correctness-layer.md`
+· **Companion docs:** `docs/evaluation-methodology.md`, `docs/architecture.md`
 
 ---
 
@@ -73,7 +73,7 @@ process that, live, re-runs the backtest's decision function
 (`shadow_entry_signal`, `shadow_manage_exit`) on the same bars and diffs it
 against what the live path decided. Divergence is surfaced as a named sentinel
 (`signal_drift`, `manage_exit_drift`, `shadow_bar_missing`), and orders are
-reconciled to position. (Full detail: `docs/correctness-layer.md`.)
+reconciled to position.
 
 The sidecar is deliberately **out-of-band** — its own process and GIL, fed over
 an IPC queue, async and non-blocking — so the thing that watches the hot path
@@ -98,8 +98,8 @@ never perturbs the timing it was built to measure.
   and capacity are separate concerns. They are tracked (latency/slippage
   telemetry) but not solved by this design.
 - Formal out-of-sample / walk-forward evaluation is the intended next tightening
-  (roadmap) but is not yet shipped; today the regime + parameter-plateau +
-  shadow checks are the shipped discipline.
+  (not yet shipped); today the regime + parameter-plateau + shadow checks are the
+  shipped discipline.
 - The guarantee depends on the shadow logic being kept in lockstep with the live
   decision path; drift sentinels make a lapse visible, but they do not make it
   impossible.

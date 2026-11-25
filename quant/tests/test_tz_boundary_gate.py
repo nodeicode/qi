@@ -1,6 +1,6 @@
 """Deterministic gate: no tz handling in the engine decision path.
 
-The timestamp boundary lives in ``quant/data/_times.py`` (see the roadmap).
+The timestamp boundary lives in ``quant/data/_times.py``.
 The decision-path code in the engine must be **read-only** over canonical
 tz-naive-UTC stamps — no ``tz_localize`` / ``tz_convert`` /
 ``replace(tzinfo=...)`` / ``.tzinfo`` branching.

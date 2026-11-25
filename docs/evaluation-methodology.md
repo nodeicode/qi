@@ -35,8 +35,8 @@ Even with one pipeline, *data* and *order handling* could drift. The sidecar
 monitor runs the backtest-reference decision live, in shadow, on the same bars,
 and diffs it against what the live path did — surfacing `signal_drift`,
 `manage_exit_drift`, `shadow_bar_missing`, and reconciling orders to position.
-See `docs/correctness-layer.md`. A strategy is "honest" only if its shadow and
-live decisions agree.
+See `docs/whitepaper-backtest-live-drift.md` §3 (the sidecar). A strategy is
+"honest" only if its shadow and live decisions agree.
 
 ## 3. The evaluation bar (what a deployable strategy must show)
 
@@ -67,11 +67,10 @@ positive alpha) to even be eligible.
 - **Regime join → a strategy must not be a single-environment artifact.**
 - **Monte Carlo → must survive synthetic paths, not just its realized one.**
 
-> **Planned (on roadmap, not yet shipped):** formal **out-of-sample** reporting
-> (results on an untouched hold-out) and **walk-forward** rolling evaluation. As
-> of now the sensitivity/plateau + regime + shadow checks are the shipped
-> discipline; OOS/walk-forward formalization is the next tightening (tracked in
-> `docs/roadmap.md`).
+> **Planned (not yet shipped):** formal **out-of-sample** reporting (results on
+> an untouched hold-out) and **walk-forward** rolling evaluation. As of now the
+> sensitivity/plateau + regime + shadow checks are the shipped discipline;
+> OOS/walk-forward formalization is the next tightening.
 
 ## 5. Measure the *journey*, not just the destination
 
