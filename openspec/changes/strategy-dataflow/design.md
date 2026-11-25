@@ -37,10 +37,13 @@ branches.
 
 ## Decisions
 
-### D1 — Reshape `TradingEngine` in place; no new engine module
+### D1 — Reshape `TradingEngine` in place; the class keeps its name
 
-`quant/core/engine.py` keeps its classes and `process_strategy` /
-`process_ticker` shape but every step is rewired:
+The class stays `TradingEngine` at `quant.core.engine.TradingEngine` with
+the same import path and public entry points (`process_strategy`, `warmup`);
+only its internal pipeline is rewired. No renamed or parallel engine class
+is introduced — `trader.py` and `backtester.py` keep constructing this one
+class. `quant/core/engine.py` keeps its classes but every step is rewired:
 
 - The per-ticker fetch (`fetch_data`/`fetch_manage_data`) resolves the
   strategy's declared subscriptions instead of `config.TICKERS` +
