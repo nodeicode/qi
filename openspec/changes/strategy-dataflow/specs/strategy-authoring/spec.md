@@ -87,3 +87,63 @@ THEN the account projection the strategy reads reflects the fill (open exposure 
 GIVEN an author body
 WHEN it inspects its imports and attributes
 THEN it holds only the venue id/declaration and typed seams — no broker SDK object is reachable
+
+### Requirement: Reference strategy — canonical worked example
+
+The change MUST ship a rewritten `example_equity` as the single canonical
+worked example of the declarative surface (the reference the SDK, docs, and
+golden/parity tests use), preserving its pre-change entry behavior so it can
+be validated exactly. Its declaration and author body MUST be spelled out
+concretely:
+
+```python
+# quant/strategies/example_equity/strategy.py (declarative rewrite)
+class ExampleEquityStrategy(DeclarativeStrategy):
+    name = "example_equity"
+    config = ExampleEquityConfig(
+        instruments=[EquityInstrument(
+            symbol="SPY", venue="backtest",
+            # contract facts on the instrument (single source):
+            contract=EquityContract(price_precision=2, lot=1),
+        )],
+        subscriptions=[Subscription(
+            instrument="SPY", datatype=Datatype.BARS, cadence="1h")],
+        venue="backtest",
+        # framework risk/execution fields kept for the author to read:
+        initial_capital=100_000.0, capital_fraction=0.95,
+        max_concurrent_positions=1, pre_load_days=60, data_delay=0,
+        fast_window=10, slow_window=30,   # MA cross windows (legacy 10/30)
+    )
+
+    def decide(self, events, projection) -> list[DecisionItem]:
+        bars = events.bars("SPY")            # adjusted Close only (invariant)
+        fast = bars.close.rolling(self.config.fast_window).mean()
+        slow = bars.close.rolling(self.config.slow_window).mean()
+        if cross_up(fast, slow):            # legacy MA cross-up semantics
+            qty = size_equity_lot(
+                projection,                 # read-only equity / buying power
+                bars.close.iloc[-1],
+                instrument=self.config.instruments[0],
+            )
+            return [self.config.instruments[0].make_order("BUY", qty)]
+        if cross_down(fast, slow):          # exit intent on manage-cadence bars
+            return [ExitIntent(self.name)]
+        return []
+```
+
+The rewrite MUST keep the pre-change MA windows (10/30) and the ~0.95
+fraction-of-equity entry sizing semantics so the golden comparison over the
+same synthetic fixture produces the **same entry decision sequence** as the
+legacy 3-method `ExampleEquityStrategy` — but now sized on the instrument
+(lot/price precision) against the injected `projection`, never via
+`CAPITAL_PER_TRADE`/`SIZING_STRATEGIES`.
+
+#### Scenario: Reference strategy constructs with resolvable declarations
+GIVEN the rewritten `example_equity` declaration above
+WHEN it is constructed on the backtest root and the live root
+THEN `config.instruments`, `config.subscriptions`, and `config.venue` resolve on both roots and `decide` is callable
+
+#### Scenario: Backtest entry behavior matches the pre-change reference
+GIVEN the same synthetic fixture as the legacy golden
+WHEN the rewritten strategy runs in backtest through the reshaped pipeline
+THEN the entry decision sequence matches the pre-change `example_equity` (golden comparison), with sizing expressed on the instrument + projection

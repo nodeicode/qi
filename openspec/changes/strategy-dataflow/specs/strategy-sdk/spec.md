@@ -74,6 +74,15 @@ GIVEN a strategy declaring a venue id that is not registered
 WHEN the strategy/config is constructed
 THEN construction fails with a clear message
 
+#### Scenario: Declarative reference config resolves
+GIVEN the canonical reference config for `example_equity`:
+`instruments=[EquityInstrument("SPY", contract=EquityContract(price_precision=2, lot=1))]`,
+`subscriptions=[Subscription("SPY", Datatype.BARS, "1h")]`,
+`venue="backtest"`, plus framework fields `initial_capital=100_000.0`,
+`max_concurrent_positions=1`, `pre_load_days=60`
+WHEN the strategy/config is constructed
+THEN the instruments and subscription resolve against the data port and `quant.venue`, and construction succeeds
+
 #### Scenario: Unknown strategy rejected at construction
 GIVEN a loader request for an unregistered strategy
 WHEN it is loaded

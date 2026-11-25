@@ -48,9 +48,10 @@ split it — never layer a parallel path.
 
 ## 6. Migrate the reference strategy and land internals
 
-- [ ] 6.1 Rewrite `example_equity` against the declarative surface (declared instruments/subscriptions/venue, author body, strategy-owned sizing); verify it runs in backtest through the reshaped pipeline and matches the pre-change entry behavior via the golden comparison (spec `strategy-sdk` `Strategy registry and dynamic loading`)
+- [ ] 6.1 Rewrite `example_equity` against the declarative surface exactly as scoped in `strategy-authoring` `Reference strategy`: declared `EquityInstrument("SPY", contract=EquityContract(price_precision=2, lot=1))`, `(SPY, BARS, "1h")` subscription, a venue, `decide` computing the 10/30 MA cross and sizing on the instrument lot + injected `projection` (not `CAPITAL_PER_TRADE`/fraction); verify it runs in backtest through the reshaped pipeline and the entry decision sequence matches the pre-change `example_equity` golden (spec `strategy-authoring` `Reference strategy`)
 - [ ] 6.2 Land the wiring: `quant/strategies` registry/loader, `quant/backtest/backtester.py`, executors, and `quant/live/trader.py` on the new seams; delete the remaining legacy path pieces (signal cache/warmup reshape, indicator-injection contract removal per spec `strategy-sdk` `Indicator injection contract` REMOVED); verify `uv run test` green, `uv run ruff check .` clean
 - [ ] 6.3 Keep specs and internals the source of truth: run `openspec validate strategy-dataflow`; verify the change's spec deltas match the implemented behavior — no docs-first drift (user-facing correctness docs stay deferred to the roadmap)
+- [ ] 6.4 Ship the end-to-end parity capstone: upgrade `quant/tests/backtest/test_all_primitives_parity.py` from the legacy 3-method engine path to the declarative path — run the **same** rewritten `example_equity` through the backtest venue AND a live venue (offline, same synthetic fixture) via `TradingEngine.process_strategy`; assert an identical decision transcript (only venue fills differ) and freeze/regenerate the golden artifact (spec `decision-engine` `End-to-end parity proof`)
 
 ## Workflow follow-up
 
