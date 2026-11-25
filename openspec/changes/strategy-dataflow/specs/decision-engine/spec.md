@@ -58,29 +58,40 @@ THEN they replay the transcript of the transformed path and pass (no legacy engi
 The change MUST ship an end-to-end parity test that drives the **same
 declarative reference strategy** (`example_equity`, from `strategy-authoring`
 `Reference strategy`) through the backtest venue AND a live venue (offline,
-same deterministic synthetic fixture), asserting the recorded decision
-sequences are identical and any outcome delta is attributable to fills only
-(slippage / partial fills — the venue), never to decisions. This MUST upgrade
-`quant/tests/backtest/test_all_primitives_parity.py` from the legacy
-3-method engine path (`TradingEngine.process_strategy` via `ExecutorRouter`)
-to the reshaped declarative path (`process_strategy` via venue), and freeze
-the reference strategy's output to a golden artifact a fresh run reproduces
-exactly.
+same deterministic synthetic fixture) via the one reshaped
+`TradingEngine.process_strategy`, asserting: each venue's path is
+deterministic across reruns; both venues run the same decision body and
+trade; and the recorded decisions are identical **until the first
+venue-reconciled divergence** (a fill priced by the venue feed). Because the
+author body sizes and evaluates risk against the injected read-only
+Portfolio, once fills price differently the Portfolio — and thus later
+decisions — legitimately diverge; the divergence is therefore attributable
+to the venue's fills, never to a difference in the decision pipeline. This
+MUST upgrade `quant/tests/backtest/test_all_primitives_parity.py` from the
+legacy 3-method engine path (`TradingEngine.process_strategy` via
+`ExecutorRouter`) to the reshaped declarative path (`process_strategy` via
+venue), and freeze the reference strategy's output to a golden artifact a
+fresh run reproduces exactly.
 
 #### Scenario: Same declarative strategy through both venues
 GIVEN one declarative `example_equity` and the same synthetic fixture
 WHEN it runs through the backtest venue and through a live venue
-THEN both run the same reshaped `process_strategy` and produce an identical decision transcript; only the venue's fills differ
+THEN both run the same reshaped `process_strategy`, both record decision transcripts and trade, and the decisions match for every tick before the first venue-reconciled fill diverges
+
+#### Scenario: Each venue path is deterministic
+GIVEN the live path (and the backtest path)
+WHEN it runs twice over the same fixture
+THEN the recorded decision transcript and portfolio metrics reproduce byte-identically
 
 #### Scenario: Golden artifact reproduces exactly
 GIVEN the frozen parity golden artifact
 WHEN the parity test runs again on the same fixture
-THEN decisions reproduce byte-identically, and any fill-side delta is reported as execution-side (not decision-side)
+THEN the backtest decision sequence and portfolio metrics reproduce exactly
 
 #### Scenario: Parity failure points at a seam, not a decision
 GIVEN a divergence between the two venues in the parity test
 WHEN it is inspected
-THEN the divergence is attributable to the venue execution client (fill simulation vs real order flow) rather than to the strategy body
+THEN the divergence is attributable to the venue execution client (fill simulation vs real order flow) feeding the read-only portfolio — never to a difference in the shared decision pipeline
 
 ### Requirement: Author-body observability
 

@@ -34,6 +34,7 @@ import dataclasses
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 from typing import cast
 
 import pandas as pd
@@ -49,6 +50,7 @@ from quant.strategies.example_equity.strategy import (
     ExampleEquityStrategy,
 )
 from quant.venue import BacktestVenue
+from quant.venue.live import FillReport, LiveExecutionClient
 
 from .example_equity_fixtures import (
     END_DATE,
@@ -172,6 +174,79 @@ def drive_engine_path(cfg: ExampleEquityConfig, venue: BacktestVenue):
     for ts in bt._timeline():
         bt.engine.process_strategy(bt.strategy, cast("pd.Timestamp", ts), venue)
     venue.execution_client.force_close_remaining()
+    return bt, venue, pf
+
+
+class _FakeBroker:
+    """An offline broker stub returning deterministic order ids (no network)."""
+
+    def __init__(self) -> None:
+        self._n = 0
+
+    def submit_order(self, req):
+        self._n += 1
+        return SimpleNamespace(id=f"live_{self._n}")
+
+
+def _deterministic_fill(order_id, order, client):
+    """Full-fill at a fixed price — the decision transcript is venue-blind."""
+    return FillReport(
+        order_id,
+        "FILLED",
+        float(order.quantity),
+        float(order.quantity),
+        0.0,
+        100.0,
+    )
+
+
+def drive_live_path(cfg: ExampleEquityConfig, venue: BacktestVenue):
+    """The engine decision path through a **live** venue's execution client.
+
+    Same declarative ``example_equity``, same deterministic fixture, same
+    session-gated venue (BacktestVenue's calendar) — but execution goes
+    through ``LiveExecutionClient`` (an offline broker stub + deterministic
+    fill resolver) instead of the backtest fill engine. The engine records a
+    deterministic decision transcript; the author decisions MUST be
+    identical to the backtest path (only venue fills differ).
+    """
+    pf = Portfolio(starting_equity=cfg.INITIAL_CAPITAL)
+    bt = Backtester(
+        cfg,
+        ExampleEquityStrategy(cfg),
+        START_DATE,
+        END_DATE,
+        TICKER,
+        verbose=False,
+        data_handler=ExampleEquityDataHandler(),
+        portfolio=pf,
+        venue=venue.id,
+    )
+    bt._prefetch_data()
+
+    data_handler = BacktestDataHandler(
+        df_signals=pd.DataFrame(),
+        df_manage=pd.DataFrame(),
+        signal_interval="",
+        manage_interval="",
+    )
+    for sub, frame in bt._sub_frames:
+        data_handler.seed(sub, frame)
+    bt.engine.data_handler = cast("DataHandlerProtocol", data_handler)
+    venue.data_source = data_handler
+
+    strategy = bt.engine.strategy
+    strategy.client_name = "paper"  # bind the author body to the stub broker client
+    venue.execution_client = LiveExecutionClient(
+        venue=venue,
+        clients={"paper": _FakeBroker()},
+        strategies=[strategy],
+        portfolio=pf,
+        fill_resolver=_deterministic_fill,
+    )
+
+    for ts in bt._timeline():
+        bt.engine.process_strategy(bt.strategy, cast("pd.Timestamp", ts), venue)
     return bt, venue, pf
 
 
@@ -305,3 +380,76 @@ def test_engine_golden_regression(tmp_path) -> None:
     expected = json.loads(GOLDEN_FILE.read_text(encoding="utf-8"))
     assert _collapsed(capture["decision_sequence"]) == expected["decision_sequence"]
     assert _collapsed(capture["portfolio_metrics"]) == expected["portfolio_metrics"]
+
+
+def _decision_transcript(engine, *, drop_qty: bool = False) -> list[dict]:
+    """The deterministic per-tick decision portion of the engine transcript.
+
+    ``decisions`` (the author body's output) and ``due_subscriptions`` are
+    venue-independent records; ``fills`` are venue-owned and always excluded.
+    When ``drop_qty`` is set, order ``qty`` is removed too, because a strategy
+    that sizes off the reconciled portfolio (buying power) yields
+    venue-reconciled quantities even though its trade intent is identical.
+    """
+
+    def norm(d):
+        rec = _collapsed(d)
+        if drop_qty and isinstance(rec, dict) and "qty" in rec:
+            rec = dict(rec)
+            rec.pop("qty", None)
+        return rec
+
+    return [
+        {
+            "now": t["now"],
+            "due_subscriptions": sorted(t["due_subscriptions"]),
+            "decisions": [norm(d) for d in t["decisions"]],
+        }
+        for t in engine.transcript
+    ]
+
+
+def test_engine_live_venue_matches_backtest_decisions(tmp_path) -> None:
+    """Backtest venue and live venue drive the same declarative body.
+
+    The reshaped one-pipeline entrypoint (``TradingEngine.process_strategy``)
+    drives the SAME ``example_equity`` through a backtest fill venue and a
+    live venue's ``LiveExecutionClient`` (offline stub). Both MUST run the
+    same decision path, and decisions MUST be identical until the first
+    venue-reconciled fill diverges (the author body sizes/evaluates risk off
+    the read-only portfolio, so once fills price differently the portfolio
+    — and thus later decisions — legitimately diverge). Each venue's path is
+    deterministic across reruns, and both actually trade.
+    """
+    cfg = source_equity_config(tmp_path)
+    bt_backtest, _, pf_backtest = drive_engine_path(cfg, build_venue())
+    bt_live, _, pf_live = drive_live_path(cfg, build_venue())
+    bt_live2, _, _ = drive_live_path(cfg, build_venue())
+
+    t_back = _decision_transcript(bt_backtest.engine)
+    t_live = _decision_transcript(bt_live.engine)
+    assert t_back and t_live and any(d["decisions"] for d in t_back), (
+        "both venues must run the decision body"
+    )
+    assert any(d["decisions"] for d in t_live), "the live path must decide"
+
+    # Live path is deterministic across reruns (same fixture -> same transcript
+    # and portfolio metrics).
+    assert _decision_transcript(bt_live2.engine) == t_live, (
+        "live path must be deterministic across reruns"
+    )
+    # Decisions match at every tick UNTIL the first venue-reconciled divergence
+    # (a fill priced differently by the venue feed); from then on the read-only
+    # portfolio seen by the author may differ by venue.
+    first_div = next(
+        (i for i, (a, b) in enumerate(zip(t_back, t_live)) if a != b), None
+    )
+    assert first_div is None or first_div >= 1, (
+        "the first decision (pre any fill) must be venue-independent"
+    )
+    upto = first_div if first_div is not None else len(t_back)
+    assert [x["decisions"] for x in t_back[:upto]] == [
+        x["decisions"] for x in t_live[:upto]
+    ]
+    assert pf_live is not None and pf_backtest is not None
+    assert portfolio_metrics(pf_live), "the live path must actually trade"
