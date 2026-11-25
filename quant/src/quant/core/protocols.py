@@ -3,6 +3,7 @@ from typing import Any, Protocol, runtime_checkable
 
 import pandas as pd
 
+from quant.data.subscription import Subscription
 from quant.utils.positions import PositionDict
 from quant.utils.strategy_config import BaseStrategyConfig
 
@@ -36,6 +37,25 @@ class DataHandlerProtocol(Protocol):
     ``AlpacaDataHandler`` (live) and ``BacktestDataHandler`` (backtest).
     """
 
+    def get_data(
+        self,
+        subscription: Subscription,
+        start,
+        end,
+        use_cache: bool = True,
+        adjustment: str | None = None,
+    ) -> pd.DataFrame:
+        """Fulfill a typed ``(instrument, datatype, cadence)`` subscription.
+
+        Ships the ``bars`` datatype: returns OHLCV bars for the subscription's
+        instrument over ``[start, end]`` at its cadence, with the canonical
+        ``BARS_COLUMNS`` shape on both the backtest and live roots. The
+        ``adjustment`` argument is the equity-bar adjustment space (``"all"`` /
+        ``"raw"``); handlers for instruments without adjustments accept and
+        ignore it. Unsupported datatypes raise.
+        """
+        ...
+
     def get_historical_data(
         self,
         ticker: str,
@@ -47,10 +67,9 @@ class DataHandlerProtocol(Protocol):
     ) -> pd.DataFrame:
         """Fetch OHLCV bars for *ticker* over ``[start, end]``.
 
-        *adjustment* is the equity-bar adjustment space (``"all"`` / ``"raw"``);
-        handlers for instruments without adjustments (e.g. futures index
-        points) accept and ignore it.  ``None`` lets a handler apply its
-        natural default.
+        The engine-owned fetch path (``fetch_data`` / ``fetch_manage_data``)
+        still consumes this while the engine is migrated to subscription
+        buffers; it resolves to the same bars as :meth:`get_data`.
         """
         ...
 

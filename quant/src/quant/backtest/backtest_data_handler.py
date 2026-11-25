@@ -23,6 +23,7 @@ import pandas as pd
 
 from quant.core._utils import _trim_incomplete_daily_bar
 from quant.data._times import assert_canonical_index, parse_naive_utc
+from quant.data.subscription import Datatype, Subscription, normalize_bars_frame
 from quant.utils.time import closed_bar_asof
 
 
@@ -78,13 +79,52 @@ class BacktestDataHandler:
         so manage/signal fetches never include the bar still open at *end*
         (``searchsorted(..., side="right")`` alone would).
         """
-        if interval == self._signal_interval:
-            df = self._df_signals
-        elif interval == self._manage_interval:
-            df = self._df_manage
-        else:
-            return pd.DataFrame()
+        df = self._frame_for_interval(interval)
+        return self._slice_window(df, start, end, interval)
 
+    def get_data(
+        self,
+        subscription: Subscription,
+        start,
+        end,
+        *,
+        use_cache: bool = True,
+        adjustment: str | None = None,
+    ) -> pd.DataFrame:
+        """Fulfill a typed bars subscription by windowing the pre-loaded frame.
+
+        A ``bars`` subscription for a cadence the backtester pre-loaded maps to
+        that frame and is served by index lookup (no re-parse per bar). A
+        cadence that was not pre-loaded — or a window outside the loaded range —
+        yields an empty stream rather than raising.
+        """
+        del use_cache, adjustment
+        if subscription.datatype is not Datatype.BARS:
+            raise ValueError(
+                f"BacktestDataHandler ships bars only, got {subscription.datatype}"
+            )
+        df = self._frame_for_interval(subscription.cadence)
+        window = self._slice_window(df, start, end, subscription.cadence)
+        return normalize_bars_frame(window) if not window.empty else window
+
+    def _frame_for_interval(self, interval: str) -> pd.DataFrame:
+        """Return the pre-loaded frame whose cadence matches *interval* (or empty)."""
+        if interval == self._signal_interval:
+            return self._df_signals
+        if interval == self._manage_interval:
+            return self._df_manage
+        return pd.DataFrame()
+
+    def _slice_window(
+        self, df: pd.DataFrame, start, end, interval: str
+    ) -> pd.DataFrame:
+        """Return a window view of *df* for ``[start, end]``— no copy per bar.
+
+        For daily intervals trims the incomplete current bar; for intraday
+        intervals trims to ``closed_bar_asof(end, interval)`` so fetches never
+        include the still-open bar at *end*. An empty *df* short-circuits to an
+        empty stream.
+        """
         if df.empty:
             return df
 
