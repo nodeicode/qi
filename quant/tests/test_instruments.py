@@ -24,6 +24,8 @@ from quant.instruments import (
 )
 from quant.instruments.base import Instrument as BaseInstrument
 from quant.instruments.future import FutureInstrument as FutureInstrumentCls
+from quant.order import Order, OrderPriceType
+from quant.portfolio.base import Side
 
 
 class _FixtureConfig:
@@ -113,3 +115,77 @@ def test_equity_from_cfg_tickers() -> None:
 def test_typed_instrument_subclass_is_base() -> None:
     assert issubclass(EquityInstrument, BaseInstrument)
     assert issubclass(OptionInstrument, Instrument)
+
+
+# ── contract facts + make_order (folded from legacy ContractSpec) ──────
+def test_equity_contract_fact_defaults() -> None:
+    inst = EquityInstrument(symbol="SPY", venue="alpaca")
+    assert inst.price_precision == 2
+    assert inst.lot_size == 1
+    assert inst.multiplier == 1.0
+    assert inst.tick_size == 0.01
+
+
+def test_round_price_uses_tick_size() -> None:
+    inst = EquityInstrument(symbol="SPY", venue="alpaca")
+    assert inst.round_price(100.213, side="nearest") == pytest.approx(100.21)
+    assert inst.round_price(100.216, side="nearest") == pytest.approx(100.22)
+    fut = FutureInstrument(symbol="ES", venue="paper", multiplier=50, tick_size=0.25)
+    assert fut.round_price(4010.13, side="ask") == 4010.25
+    assert fut.round_price(4010.13, side="bid") == 4010.0
+
+
+def test_pnl_computes_from_multiplier() -> None:
+    fut = FutureInstrument(symbol="ES", venue="paper", multiplier=50, tick_size=0.25)
+    assert fut.pnl(4000.0, 4002.0, 1, 1) == 100.0
+    assert fut.pnl(4000.0, 4002.0, 1, -1) == -100.0
+
+
+def test_make_order_builds_typed_order() -> None:
+    inst = EquityInstrument(symbol="SPY", venue="alpaca")
+    order = inst.make_order("BUY", 100)
+    assert isinstance(order, Order)
+    assert order.side is Side.BUY
+    assert order.quantity == 100
+    assert order.price_type is OrderPriceType.MARKET
+    assert order.venue == "alpaca"
+    assert order.instrument == inst
+    assert Order.from_schema(order.to_schema()) == order
+
+
+def test_make_order_with_limit_price() -> None:
+    inst = EquityInstrument(symbol="AAPL", venue="paper")
+    order = inst.make_order("SELL", 10, price=199.5)
+    assert order.side is Side.SELL
+    assert order.price_type is OrderPriceType.LIMIT
+    assert order.price == 199.5
+
+
+def test_future_contract_facts_are_single_source() -> None:
+    fut = FutureInstrument(
+        symbol="MES", venue="paper", multiplier=5, tick_size=0.25, margin=2000
+    )
+    assert fut.margin == 2000
+    assert fut.round_price(4000.12, side="bid") == 4000.0
+
+
+def test_round_price_guards_missing_tick() -> None:
+    inst = EquityInstrument(symbol="SPY", venue="paper", tick_size=None)
+    with pytest.raises(ValueError, match="tick_size"):
+        inst.round_price(100.0)
+    # non-positive / non-finite prices pass through without rounding
+    assert EquityInstrument(symbol="SPY", venue="paper").round_price(0.0) == 0.0
+
+
+def test_pnl_guards_missing_multiplier() -> None:
+    inst = EquityInstrument(symbol="SPY", venue="paper", multiplier=None)
+    with pytest.raises(ValueError, match="multiplier"):
+        inst.pnl(100.0, 101.0, 1, 1)
+
+
+def test_make_order_accepts_side_member_and_explicit_price_type() -> None:
+    inst = EquityInstrument(symbol="SPY", venue="paper")
+    order = inst.make_order(Side.BUY, 10, price_type=OrderPriceType.LIMIT, price=200.0)
+    assert order.side is Side.BUY
+    assert order.price_type is OrderPriceType.LIMIT
+    assert order.price == 200.0

@@ -42,11 +42,8 @@ from quant.core._utils import (
     _SIGNAL_META,
     ALL_ENTRY_SIGNALS,
     DEFAULT_INDICATOR_COLUMNS,
-    PRODUCT_SPECS,
     SIGNAL_REGISTRY,
     AssetClass,
-    ContractSpec,
-    ProductFamily,
     SignalRegistry,
     SignalType,
     _to_utc_naive_us,
@@ -345,110 +342,6 @@ class TestSignalDirection:
 
     def test_unknown_defaults_to_positive(self):
         assert signal_direction("UNKNOWN") == 1
-
-
-# ========================================================================
-# 2b. ContractSpec / ProductSpecRegistry / SessionClock
-# ========================================================================
-
-
-class TestContractSpec:
-    def test_valid_spec_constructed(self):
-        spec = ContractSpec(
-            root="MES",
-            family="equity_index",
-            multiplier=5.0,
-            tick_size=0.25,
-            tick_value=1.25,
-        )
-        assert spec.family == ProductFamily.EQUITY_INDEX
-        assert spec.quote == "INDEX_POINTS"
-
-    def test_invalid_spec_fails_fast(self):
-        with pytest.raises(ValueError):
-            ContractSpec(
-                root="",
-                family="EQUITY_INDEX",
-                multiplier=5.0,
-                tick_size=0.25,
-                tick_value=1.25,
-            )
-        with pytest.raises(ValueError):
-            ContractSpec(
-                root="MES",
-                family="EQUITY_INDEX",
-                multiplier=0.0,
-                tick_size=0.25,
-                tick_value=1.25,
-            )
-        with pytest.raises(ValueError):
-            ContractSpec(
-                root="MES",
-                family="EQUITY_INDEX",
-                multiplier=5.0,
-                tick_size=0.0,
-                tick_value=1.25,
-            )
-        with pytest.raises(ValueError):
-            ContractSpec(
-                root="MES",
-                family="EQUITY_INDEX",
-                multiplier=5.0,
-                tick_size=0.25,
-                tick_value=0.0,
-            )
-
-
-class TestProductSpecRegistry:
-    def test_seeded_products(self):
-        assert "MES" in PRODUCT_SPECS
-        assert "es" in PRODUCT_SPECS  # case-insensitive
-        assert PRODUCT_SPECS.get("SR3").multiplier == 2500.0
-        assert PRODUCT_SPECS.get("ES").tick_value == 12.50
-        assert PRODUCT_SPECS.get("MES").tick_value == 1.25
-
-    def test_get_strict_raises_for_unknown(self):
-        with pytest.raises(KeyError):
-            PRODUCT_SPECS.get("OIL", strict=True)
-        assert PRODUCT_SPECS.get("OIL", strict=False) is None
-
-    def test_register_duplicate_root_rejected(self):
-        from quant.core._utils import ProductSpecRegistry
-
-        reg = ProductSpecRegistry()
-        reg.register(
-            ContractSpec(
-                root="MES",
-                family=ProductFamily.EQUITY_INDEX,
-                multiplier=5.0,
-                tick_size=0.25,
-                tick_value=1.25,
-            )
-        )
-        duplicate = ContractSpec(
-            root="MES",
-            family=ProductFamily.EQUITY_INDEX,
-            multiplier=4.0,
-            tick_size=0.25,
-            tick_value=1.0,
-        )
-        with pytest.raises(ValueError):
-            reg.register(duplicate)
-
-    def test_register_then_get(self):
-        from quant.core._utils import ProductSpecRegistry
-
-        reg = ProductSpecRegistry()
-        my = ContractSpec(
-            root="CUSTOM",
-            family=ProductFamily.INTEREST_RATE,
-            multiplier=100.0,
-            tick_size=1.0,
-            tick_value=100.0,
-        )
-        reg.register(my)
-        assert reg.get("custom") == my
-        assert reg.keys() == ["CUSTOM"]
 
 
 class TestSessionClocks:

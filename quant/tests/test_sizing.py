@@ -20,6 +20,7 @@ from quant.core.sizing import (
     size_for_asset,
     size_for_signal,
 )
+from quant.instruments.future import FutureInstrument
 from quant.utils.strategy_config import BaseStrategyConfig
 
 
@@ -227,25 +228,31 @@ class TestOptionSpreadIcParity:
 class TestFuturesSizing:
     def test_margin_fraction_model(self):
         cfg = _config(CAPITAL_PER_TRADE=0.1, FUTURES_MARGIN_FRACTION=0.10)
-        # MES multiplier 5.0; entry_price 4000 -> margin = 0.10*4000*5 = $2,000/contract
+        inst = FutureInstrument(
+            symbol="MES", venue="paper", multiplier=5.0, tick_size=0.25
+        )
+        # multiplier 5.0; entry_price 4000 -> margin = 0.10*4000*5 = $2,000/contract
         out = size_for_asset(
             AssetClass.FUTURES,
             config=cfg,
             equity=25_000,
             entry_price=4_000.0,
-            root="MES",
+            instrument=inst,
         )
         assert out["n_contracts"] == 1  # capital 2,500 // 2,000
         assert out["margin_per_contract"] == 2_000.0
 
     def test_explicit_margin_override(self):
         cfg = _config(CAPITAL_PER_TRADE=0.5, FUTURES_MARGIN_PER_CONTRACT=1_000.0)
+        inst = FutureInstrument(
+            symbol="ES", venue="paper", multiplier=50.0, tick_size=0.25
+        )
         out = size_for_asset(
             AssetClass.FUTURES,
             config=cfg,
             equity=10_000,
             entry_price=4_000.0,
-            root="ES",
+            instrument=inst,
         )
         # capital 5,000 // 1,000 = 5 contracts
         assert out["n_contracts"] == 5
@@ -253,27 +260,19 @@ class TestFuturesSizing:
 
     def test_insufficient_capital_skips(self):
         cfg = _config(CAPITAL_PER_TRADE=0.01, FUTURES_MARGIN_PER_CONTRACT=5_000.0)
+        inst = FutureInstrument(
+            symbol="ES", venue="paper", multiplier=50.0, tick_size=0.25
+        )
         out = size_for_asset(
             AssetClass.FUTURES,
             config=cfg,
             equity=10_000,
             entry_price=4_000.0,
-            root="ES",
+            instrument=inst,
         )
         assert out["n_contracts"] == 0
 
-    def test_unknown_root_fails_loud(self):
-        cfg = _config()
-        with pytest.raises(KeyError):
-            size_for_asset(
-                AssetClass.FUTURES,
-                config=cfg,
-                equity=10_000,
-                entry_price=4_000.0,
-                root="OIL",
-            )
-
-    def test_missing_root_and_no_margin_fails(self):
+    def test_no_instrument_and_no_margin_fails(self):
         cfg = _config()
         with pytest.raises(ValueError):
             size_for_asset(

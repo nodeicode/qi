@@ -22,7 +22,8 @@ import math
 from abc import ABC, abstractmethod
 from typing import Any, ClassVar
 
-from quant.core._utils import PRODUCT_SPECS, SIGNAL_REGISTRY, AssetClass
+from quant.core._utils import SIGNAL_REGISTRY, AssetClass
+from quant.instruments.base import Instrument
 from quant.utils.strategy_config import BaseStrategyConfig
 
 
@@ -162,12 +163,12 @@ class FuturesSizing(SizingStrategy):
     per-contract margin is resolved as::
 
         margin = config.FUTURES_MARGIN_PER_CONTRACT        (explicit $, if set)
-        else config.FUTURES_MARGIN_FRACTION * entry_price * spec.multiplier
+        else config.FUTURES_MARGIN_FRACTION * entry_price * instrument.multiplier
 
-    where ``spec`` is the :class:`ContractSpec` for *root* (``PRODUCT_SPECS``).
-    ``FUTURES_MARGIN_FRACTION`` defaults to ``0.10`` — a documented
-    approximation; strategies that need exchange-exact margin (initial +
-    maintenance, per-tier, product-specific) should set
+    Contract facts come from the passed typed ``instrument`` — there is no
+    separate contract-facts registry.  ``FUTURES_MARGIN_FRACTION`` defaults to
+    ``0.10`` — a documented approximation; strategies that need exchange-exact
+    margin (initial + maintenance, per-tier, product-specific) should set
     ``FUTURES_MARGIN_PER_CONTRACT`` explicitly.
     """
 
@@ -179,11 +180,11 @@ class FuturesSizing(SizingStrategy):
         config: BaseStrategyConfig,
         equity: float,
         entry_price: float,
-        root: str | None = None,
+        instrument: Instrument | None = None,
         **kw: Any,
     ) -> dict:
         capital = equity * float(config.CAPITAL_PER_TRADE)
-        multiplier = PRODUCT_SPECS.get(root, strict=True).multiplier if root else None
+        multiplier = instrument.multiplier if instrument is not None else None
         explicit_margin = getattr(config, "FUTURES_MARGIN_PER_CONTRACT", None)
         if explicit_margin:
             margin = float(explicit_margin)
@@ -211,8 +212,7 @@ class SizingRegistry:
     """Registry of :class:`SizingStrategy` keyed by :class:`AssetClass`.
 
     Additive by construction — registering a sizing strategy for a new asset
-    class never edits the engine (mirrors ``SignalRegistry`` /
-    ``ProductSpecRegistry``).
+    class never edits the engine (mirrors ``SignalRegistry``).
     """
 
     def __init__(self) -> None:

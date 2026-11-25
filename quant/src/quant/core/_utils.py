@@ -23,10 +23,9 @@ What lives here
   These three were private TradingEngine methods called only from
   ``process_strategy`` / ``process_ticker``.  Making them standalone
   functions keeps TradingEngine's public surface clean.
-* Futures utils                  — ``ContractSpec`` / ``ProductSpecRegistry`` /
-                                    ``PRODUCT_SPECS`` (multiplier/tick tables),
-                                    seed products (ES/MES/SR3).  Grouped at the
-                                    bottom.
+  Contract specs moved to the typed instruments (``quant.instruments``) as the
+  single source; the ``ContractSpec``/``ProductSpecRegistry``/``PRODUCT_SPECS``
+  tables here are deleted.
 """
 
 from __future__ import annotations
@@ -34,7 +33,6 @@ from __future__ import annotations
 import contextlib
 import contextvars
 import logging
-import math
 import time
 from collections.abc import (  # noqa: F401  (re-exported type)
     Callable,
@@ -43,7 +41,7 @@ from collections.abc import (  # noqa: F401  (re-exported type)
 from dataclasses import dataclass
 from enum import StrEnum
 from numbers import Integral
-from typing import Any, Literal, TypedDict, overload
+from typing import Any, Literal, TypedDict
 
 import pandas as pd
 
@@ -614,199 +612,6 @@ def call_manage_trade(
         _logger = log or _log
         _logger.error("manage_trade error: %s", e)
         return -1
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Futures utils — instrument contract specs (multiplier/tick) and session
-# clocks for futures products.  Pure data + clocks; consumed by the futures
-# sizing/executor paths and by backtest entry-time resolution.
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-class ProductFamily(StrEnum):
-    """Broad market family a futures product belongs to.
-
-    Used for validation/grouping only — all trading math lives on
-    :class:`ContractSpec` (multiplier/tick), not here.
-    """
-
-    EQUITY_INDEX = "EQUITY_INDEX"
-    INTEREST_RATE = "INTEREST_RATE"
-    ENERGY = "ENERGY"
-    METALS = "METALS"
-    AGRICULTURE = "AGRICULTURE"
-
-
-@dataclass(frozen=True, slots=True)
-class ContractSpec:
-    """Fixed contract economics for one futures product.
-
-    Pure data — no trading logic.  ``multiplier`` is the US-dollar P&L per
-    1.00 move in the quoted index level; ``tick_size`` the minimum price
-    fluctuation in quote points; ``tick_value`` its dollar value.  For
-    products with tiered ticks (e.g. SOFR near-expiry 0.0025 = $6.25 vs
-    0.005 = $12.50) the headline ``tick_value`` is authoritative and the
-    tiering is a strategy-side concern, not this table's.
-
-    Validated at construction so a bad product-table entry fails at
-    import/test time, never mid-backtest.
-    """
-
-    root: str  # CME product root, e.g. "MES", "ES", "SR3", "2YY"
-    family: ProductFamily | str
-    multiplier: float  # $ per 1.00 index-point move
-    tick_size: float  # minimum price fluctuation (quote points)
-    tick_value: float  # $ per tick
-    quote: str = "INDEX_POINTS"  # INDEX_POINTS | IMM_INDEX | YIELD_POINTS (info)
-    session: str = "cme-futures"  # SessionClock registry key
-    source: str = ""  # spec provenance (CME rulebook / spec page)
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.family, ProductFamily):
-            object.__setattr__(self, "family", ProductFamily(str(self.family).upper()))
-        if not self.root or not str(self.root).strip():
-            raise ValueError(f"ContractSpec root must be non-empty, got {self.root!r}")
-        if not (self.multiplier > 0):
-            raise ValueError(
-                f"{self.root}: multiplier must be > 0, got {self.multiplier}"
-            )
-        if not (self.tick_size > 0):
-            raise ValueError(
-                f"{self.root}: tick_size must be > 0, got {self.tick_size}"
-            )
-        if not (self.tick_value > 0):
-            raise ValueError(
-                f"{self.root}: tick_value must be > 0, got {self.tick_value}"
-            )
-
-    # ── Contract math (pure functions of the spec — used by fills & P&L) ──
-    def round_price(self, price: float, *, side: str = "nearest") -> float:
-        """Round *price* to the product's minimum price fluctuation.
-
-        ``side`` controls the rounding direction for fills:
-
-        * ``"ask"`` — round **up** (least-favorable for a buyer, pays at the
-          next tick — conservative).
-        * ``"bid"`` — round **down** (least-favorable for a seller, receives
-          the next lower tick).
-        * ``"nearest"`` — half-up rounding (quotes/analysis).
-        """
-        if price <= 0 or not math.isfinite(price):
-            return price
-        ts = float(self.tick_size)
-        if side == "ask":
-            return math.ceil(price / ts - 1e-9) * ts
-        if side == "bid":
-            return math.floor(price / ts + 1e-9) * ts
-        return math.floor(price / ts + 0.5) * ts
-
-    def pnl(
-        self, entry_price: float, exit_price: float, n_contracts: int, direction: int
-    ) -> float:
-        """Dollar P&L for *n_contracts* at *direction* (+1 long / -1 short).
-
-        ``multiplier`` is $ per 1.00 index point, so a +1.00 move on one
-        contract yields exactly ``multiplier`` dollars regardless of the
-        instrumental level (ES $50, MES $5, SR3 $2,500).
-        """
-        return (exit_price - entry_price) * self.multiplier * n_contracts * direction
-
-
-class ProductSpecRegistry:
-    """Registry of :class:`ContractSpec` keyed by product root.
-
-    Additive by construction — registering a new product never touches
-    engine/backtest code (mirrors the ``SignalRegistry`` pattern).
-    """
-
-    def __init__(self) -> None:
-        self._specs: dict[str, ContractSpec] = {}
-
-    def register(self, spec: ContractSpec) -> None:
-        key = str(spec.root).upper()
-        existing = self._specs.get(key)
-        if existing is not None and existing != spec:
-            raise ValueError(
-                f"Product root {key!r} already registered as {existing} — "
-                f"cannot overwrite with {spec}. Register under a distinct root."
-            )
-        self._specs[key] = spec
-
-    @overload
-    def get(self, root: str, *, strict: Literal[True] = True) -> ContractSpec: ...
-
-    @overload
-    def get(self, root: str, *, strict: Literal[False]) -> ContractSpec | None: ...
-
-    def get(self, root: str, *, strict: bool = True) -> ContractSpec | None:
-        """Look up a product spec by root (case-insensitive).
-
-        ``strict=True`` raises ``KeyError`` for unregistered roots so the
-        futures executor fails loud on a mistyped/product-root symbol
-        instead of silently defaulting.  Type-aware: the default path is
-        typed ``ContractSpec`` (non-None); pass ``strict=False`` for the
-        optional lookup.
-        """
-        try:
-            return self._specs[str(root).upper()]
-        except KeyError:
-            if strict:
-                registered = ", ".join(sorted(self._specs)) or "(none)"
-                raise KeyError(
-                    f"No ContractSpec registered for product root {root!r}. "
-                    f"Registered: {registered}"
-                ) from None
-            return None
-
-    def __contains__(self, root: str) -> bool:
-        return str(root).upper() in self._specs
-
-    def keys(self) -> list[str]:
-        return sorted(self._specs)
-
-
-# Global product table — seeded with the products we trade first (CME).
-# Treasury micro (2YY/5YY/10Y/30Y) specs are added under step "Validate
-# exact CME specs".  Sources: CME contract-spec pages (2025-08 research).
-PRODUCT_SPECS: ProductSpecRegistry = ProductSpecRegistry()
-PRODUCT_SPECS.register(
-    ContractSpec(
-        root="ES",
-        family=ProductFamily.EQUITY_INDEX,
-        multiplier=50.0,
-        tick_size=0.25,
-        tick_value=12.50,
-        quote="INDEX_POINTS",
-        session="cme-futures",
-        source="CME E-mini S&P 500 futures (Rule 353; $50/point, 0.25 tick)",
-    )
-)
-PRODUCT_SPECS.register(
-    ContractSpec(
-        root="MES",
-        family=ProductFamily.EQUITY_INDEX,
-        multiplier=5.0,
-        tick_size=0.25,
-        tick_value=1.25,
-        quote="INDEX_POINTS",
-        session="cme-futures",
-        source="CME Micro E-mini S&P 500 futures (Rule 358; $5/point, 0.25 tick)",
-    )
-)
-PRODUCT_SPECS.register(
-    ContractSpec(
-        root="SR3",
-        family=ProductFamily.INTEREST_RATE,
-        multiplier=2500.0,
-        tick_size=0.005,
-        tick_value=12.50,
-        quote="IMM_INDEX",
-        session="cme-futures",
-        source=(
-            "CME 3-Month SOFR: $2,500/point; 0.005 tick = $12.50 (0.0025/$6.25 near expiry)"
-        ),
-    )
-)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
