@@ -27,6 +27,7 @@ from quant.venue.base import (
     Venue,
     to_utc_naive,
 )
+from quant.venue.live import FillReport, LiveExecutionClient
 
 __all__ = [
     "DEFAULT_CLOSE",
@@ -40,6 +41,8 @@ __all__ = [
     "CalendarProtocol",
     "DataSourceProtocol",
     "ExecutionClientProtocol",
+    "FillReport",
+    "LiveExecutionClient",
     "SessionDay",
     "Venue",
     "register_venue",

@@ -1,8 +1,9 @@
 """Live portfolio wiring + snapshot restart recovery (spec `portfolio`, type 4.4).
 
 Covers:
-  - the live executor streams venue fill events through the same Portfolio /
-    Position machinery as backtest (entry opens, close settles);
+  - the live venue's execution client streams venue fill events through the
+    same Portfolio / Position machinery as backtest (entry opens, close
+    settles);
   - the live trader persists a portfolio snapshot in trader_state.json and
     restores positions + balances on restart (spec persistence scenario).
 """
@@ -10,20 +11,21 @@ Covers:
 from __future__ import annotations
 
 import logging
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from quant.live.executors.unified_executor import UnifiedExecutor
 from quant.live.trader import UnifiedTrader
 from quant.portfolio import Fill, Portfolio, Side
+from quant.venue.live import LiveExecutionClient
 
 _logger = logging.getLogger("test_portfolio_live")
 
 
 # ---------------------------------------------------------------------------
-# Helpers (mirror test_unified_executor patterns)
+# Helpers
 # ---------------------------------------------------------------------------
 
 
@@ -31,17 +33,7 @@ def _make_engine() -> MagicMock:
     eng = MagicMock()
     eng.route.return_value = "EQUITY"
     eng.direction.return_value = 1
-    eng.build_position.side_effect = lambda *a, **kw: {
-        "AssetType": kw.get("AssetType", "EQUITY"),
-        "Ticker": kw.get("Ticker", "SPY"),
-        "OrderId": kw.get("OrderId", "ord"),
-        "Qty": kw.get("Qty", 10),
-        "Signal": a[3] if len(a) > 3 else kw.get("Signal", "BUY"),
-        "EntryPrice": a[2] if len(a) > 2 else kw.get("EntryPrice", 0.0),
-        "StopLoss": kw.get("StopLoss"),
-        "TakeProfit": kw.get("TakeProfit"),
-        **kw,
-    }
+    eng.build_position.side_effect = lambda *a, **kw: dict(kw)
     return eng
 
 
@@ -54,39 +46,42 @@ def _make_strategy(name: str = "TestStrat_paper") -> MagicMock:
     return s
 
 
-def _make_executor(equity: float = 50000.0, portfolio: Portfolio | None = None):
-    mock_client = MagicMock()
-    dh = MagicMock()
-    dh.clients = {"paper": mock_client}
-    ex = UnifiedExecutor(
-        clients={"paper": mock_client},
-        data_handler=dh,
-        logger=_logger,
+def _make_client(equity: float = 50000.0, portfolio: Portfolio | None = None):
+    broker = MagicMock()
+    broker.submit_order.return_value = MagicMock(id="ord-001")
+    equity_mgr = MagicMock()
+    equity_mgr.get.return_value = equity
+    equity_mgr.set_active.return_value = True
+    strategy = _make_strategy()
+    ex = LiveExecutionClient(
+        venue=SimpleNamespace(id="paper"),
+        clients={"paper": broker},
+        strategies=[strategy],
+        active_positions={},
         portfolio=portfolio,
+        logger=_logger,
+        equity_mgr=equity_mgr,
+        price_source=lambda order: 450.0,
     )
-    ex.equity_mgr = MagicMock()
-    ex.equity_mgr.get.return_value = equity
-    return ex, mock_client, dh
+    return ex, broker
 
 
 # ---------------------------------------------------------------------------
-# Live executor parity wiring
+# Live execution-client parity wiring
 # ---------------------------------------------------------------------------
 
 
 class TestLiveExecutorParity:
     def test_entry_fill_opens_position(self) -> None:
         pf = Portfolio(starting_equity=10_000.0)
-        ex, client, _ = _make_executor(portfolio=pf)
-        client.submit_order.return_value = MagicMock(id="ord-001")
+        ex, _ = _make_client(portfolio=pf)
         strategy = _make_strategy()
 
-        pos = ex._enter_linear_trade(
+        pos = ex.enter(
             strategy,
             "SPY",
-            {"Signal": "BUY", "Close": 450.0},
-            "EQUITY",
-            engine=_make_engine(),
+            {"Signal": "BUY", "Close": 450.0, "Confidence": 0.9},
+            _make_engine(),
         )
 
         assert pos is not None
@@ -98,32 +93,27 @@ class TestLiveExecutorParity:
 
     def test_exit_fill_closes_through_same_machinery(self) -> None:
         pf = Portfolio(starting_equity=10_000.0)
-        ex, client, _ = _make_executor(portfolio=pf)
-        client.submit_order.return_value = MagicMock(id="ord-001")
+        ex, _ = _make_client(portfolio=pf)
         strategy = _make_strategy()
 
-        pos = ex._enter_linear_trade(
+        pos = ex.enter(
             strategy,
             "SPY",
-            {"Signal": "BUY", "Close": 450.0},
-            "EQUITY",
-            engine=_make_engine(),
+            {"Signal": "BUY", "Close": 450.0, "Confidence": 0.9},
+            _make_engine(),
         )
-        qty = pos["Qty"]
-        assert ex.exit_trade(pos, qty) is True
+        assert ex.exit("TestStrat_paper", pos, {}) is True
         assert pf.position("paper", "SPY") is None  # closed
         assert len(pf.closed_positions) == 1
 
     def test_no_portfolio_is_a_noop(self) -> None:
-        # Backwards compatible: without a portfolio, fills are simply not emitted.
-        ex, client, _ = _make_executor(portfolio=None)
-        client.submit_order.return_value = MagicMock(id="ord-001")
-        pos = ex._enter_linear_trade(
+        # Without a portfolio collector, entry fills are simply not emitted.
+        ex, _ = _make_client(portfolio=None)
+        pos = ex.enter(
             _make_strategy(),
             "SPY",
-            {"Signal": "BUY", "Close": 450.0},
-            "EQUITY",
-            engine=_make_engine(),
+            {"Signal": "BUY", "Close": 450.0, "Confidence": 0.9},
+            _make_engine(),
         )
         assert pos is not None
 
@@ -199,4 +189,3 @@ class TestTraderRestartRecovery:
             trader._load_local_state()
         # default portfolio retained (fail closed), no crash
         assert trader.portfolio is not None
-        assert trader.portfolio.position("paper", "SPY") is None

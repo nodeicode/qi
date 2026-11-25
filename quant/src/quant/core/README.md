@@ -89,15 +89,10 @@ DISPATCH ──EXIT──> executor.exit(s_name, pos, sig, manage_df) ──> af
 monitor.emit (async queue — never blocks)
 ```
 
-Live entry routing then splits by asset class via `engine.route(signal)`:
-
-| Asset class | Live executor path |
-|---|---|
-| IC | `IronCondorExecutor.enter/exit` — 4-leg MLEG combo, adaptive fill loops |
-| OPTION | `UnifiedExecutor._enter_option_trade` — expiry lookup → strike search → single order |
-| SPREAD | routed but **not yet implemented** (futures-spread hook) |
-| EQUITY / CRYPTO | `UnifiedExecutor._enter_linear_trade` — market/limit on symbol |
-| FUTURES | registered asset class (margin sizing) — linear single-leg via the same path, no signals yet |
+The live execution client (the live venue's `quant.venue.live.LiveExecutionClient`)
+submits every typed order the author body builds, gating on the venue session
+and reconciling (partial) fills into the shared Portfolio. The legacy per-asset
+class executor dispatch was absorbed into that one client:
 
 ## Asset Classes
 
@@ -163,8 +158,8 @@ from quant.core.engine import TradingEngine
 engine = TradingEngine(strategy, data_handler, monitor_emit=monitor_emit)
 
 # One full tick: schedule → fetch/manage data → manage exits → entry gate →
-# dispatch EXIT/ENTRY through the executor (LiveExecutor wraps UnifiedExecutor).
-engine.process_strategy(strategy, now, executor)
+# dispatch EXIT/ENTRY through the live venue's execution client.
+engine.process_strategy(strategy, now, execution_client)
 ```
 
 ### Backtest

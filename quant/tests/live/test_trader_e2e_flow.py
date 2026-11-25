@@ -10,6 +10,7 @@ import pandas as pd
 from quant.live.protocols import LiveStrategyProtocol
 from quant.live.trader import UnifiedTrader
 from quant.utils.strategy_config import BaseStrategyConfig
+from tests.live.conftest import always_open_venue
 
 # Alpaca is stubbed per-test by the autouse fixture in quant/tests/live/conftest.py.
 # Add project root to path
@@ -101,6 +102,9 @@ class TestUnifiedTraderE2E(unittest.TestCase):
         }
 
     @patch("quant.live.trader.load_state", return_value={})
+    @patch(
+        "quant.live.trader.AlpacaVenue", side_effect=lambda *a, **k: always_open_venue()
+    )
     @patch("quant.live.trader.AlpacaDataHandler")
     @patch("quant.live.trader.MarketSchedule")
     @patch("quant.live.trader.load_strategies")
@@ -109,6 +113,7 @@ class TestUnifiedTraderE2E(unittest.TestCase):
         mock_load_strategies,
         mock_schedule_cls,
         mock_dh_cls,
+        mock_venue_cls,
         mock_load_state,
     ):
         # Setup Mocks
@@ -209,15 +214,15 @@ class TestUnifiedTraderE2E(unittest.TestCase):
 
         now = datetime.datetime.now(datetime.UTC)
         # manage_trade returns 0 (exit at position index 0) for every call.
-        # exit_trade must be mocked so the executor.exit() call succeeds.
-        trader.unified_executor.exit_trade = MagicMock(return_value=True)
+        # exit must be mocked so the client.exit() dispatch succeeds.
+        trader.execution_client.exit = MagicMock(return_value=True)
         with patch.object(strategy, "manage_trade", return_value=0) as mock_manage:
             trader.process_strategy(strategy, now)
             # manage_trade was called with manage-interval data
             mock_manage.assert_called()
 
-        # EXIT was dispatched through unified_executor
-        trader.unified_executor.exit_trade.assert_called()
+        # EXIT was dispatched through the live venue execution client
+        trader.execution_client.exit.assert_called()
 
 
 # -----------------------------------------------------------------------------

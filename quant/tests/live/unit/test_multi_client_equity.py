@@ -26,8 +26,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from quant.live.executors.live_executor import LiveExecutor
 from quant.live.utils import EquityManager, MultiClientEquityManager
+from quant.venue.live import LiveExecutionClient
 
 _logger = logging.getLogger("test_multi_client_equity")
 
@@ -133,134 +133,143 @@ class TestMultiClientEquityIsolation:
 
 
 # ===========================================================================
-# LiveExecutor._set_client guard
+# LiveExecutionClient client-resolution guard
 # ===========================================================================
 
 
-class TestLiveExecutorClientGuard:
-    """
-    Tests that LiveExecutor._set_client skips execution when the client guard
-    fires, and proceeds when everything is correctly registered.
+class TestLiveExecutionClientGuard:
+    """LiveExecutionClient skips execution on a broker/account failure.
 
-    LiveExecutor is constructed directly with a MagicMock trader context so
-    we can control set_client() return values and observe enter_trade calls
-    without constructing a full UnifiedTrader.
+    The duck entry skips (loudly, with no broker call) when the strategy's
+    broker client is unknown or its account is not registered in the equity
+    manager — failures surface rather than being silently ignored — and
+    proceeds by submitting on the strategy's own client when all is registered.
     """
 
-    def _make_executor(self, strategy, *, set_client_return=True):
-        """Return (executor, refs) with mocked client deps."""
-        from collections import defaultdict
+    def _make_executor(
+        self, strategy, *, set_active_return: bool = True, equity: float = 50_000.0
+    ):
+        """Return (executor, refs) with mocked client + equity deps."""
         from types import SimpleNamespace
 
-        unified_exec = MagicMock()
-        unified_exec.set_client.return_value = set_client_return
-        unified_exec.enter_trade.return_value = None
-        clients = {"paper": MagicMock(), "paper1": MagicMock()}
-        logger = MagicMock()
-        executor = LiveExecutor(
-            last_update={},
-            last_manage_update={},
-            active_positions=defaultdict(list),
-            strategies=[strategy],
+        broker = MagicMock()
+        broker.submit_order.return_value = MagicMock(id="ord-1")
+        clients = {"paper": broker, "paper1": MagicMock()}
+        equity_mgr = MagicMock()
+        equity_mgr.set_active.return_value = set_active_return
+        equity_mgr.get.return_value = equity
+
+        engine = MagicMock()
+        engine.direction.return_value = 1
+        engine.build_position.side_effect = lambda *a, **kw: dict(kw)
+
+        executor = LiveExecutionClient(
+            venue=SimpleNamespace(id="alpaca"),
             clients=clients,
-            unified_executor=unified_exec,
+            strategies=[strategy] if strategy else [],
+            active_positions={},
+            logger=MagicMock(),
             lock=MagicMock(),
-            logger=logger,
             save_state=MagicMock(),
+            equity_mgr=equity_mgr,
         )
-        refs = SimpleNamespace(
-            clients=clients,
-            unified_executor=unified_exec,
-            logger=logger,
-        )
-        return executor, refs
+        return executor, SimpleNamespace(clients=clients, broker=broker, engine=engine)
 
     def _make_strategy(self, name: str = "TestStrat", client_name: str = "paper"):
         strat = MagicMock()
         strat.name = name
         strat.client_name = client_name
+        strat.config.CAPITAL_PER_TRADE = 0.1
         return strat
 
     def test_skips_entry_when_client_not_in_clients_dict(self) -> None:
         strat = self._make_strategy(client_name="unknown_client")
         executor, refs = self._make_executor(strat)
-        refs.clients.pop("unknown_client", None)
 
         result = executor.enter(
-            strat, "SPY", {"Signal": "BUY", "Confidence": 0.9}, MagicMock()
+            strat,
+            "SPY",
+            {"Signal": "BUY", "Close": 100.0, "Confidence": 0.9},
+            refs.engine,
         )
 
         assert result is None
-        refs.unified_executor.set_client.assert_not_called()
-        refs.unified_executor.enter_trade.assert_not_called()
-        refs.logger.error.assert_called()
-        assert "not found in trading clients dict" in refs.logger.error.call_args[0][0]
+        refs.broker.submit_order.assert_not_called()
 
-    def test_skips_entry_when_set_client_returns_falsy(self) -> None:
+    def test_skips_entry_when_equity_client_not_registered(self) -> None:
         strat = self._make_strategy(client_name="paper")
-        executor, refs = self._make_executor(strat, set_client_return=False)
+        executor, refs = self._make_executor(strat, set_active_return=False)
 
         result = executor.enter(
-            strat, "SPY", {"Signal": "BUY", "Confidence": 0.9}, MagicMock()
+            strat,
+            "SPY",
+            {"Signal": "BUY", "Close": 100.0, "Confidence": 0.9},
+            refs.engine,
         )
 
         assert result is None
-        refs.unified_executor.enter_trade.assert_not_called()
-        refs.logger.error.assert_called()
-        assert "not registered in EquityManager" in refs.logger.error.call_args[0][0]
+        refs.broker.submit_order.assert_not_called()
 
-    def test_proceeds_when_client_registered_and_set_client_truthy(self) -> None:
+    def test_proceeds_when_client_registered(self) -> None:
+        strat = self._make_strategy(client_name="paper")
+        executor, refs = self._make_executor(strat)
+
+        result = executor.enter(
+            strat,
+            "SPY",
+            {"Signal": "BUY", "Close": 100.0, "Confidence": 0.9},
+            refs.engine,
+        )
+
+        assert result is not None
+        refs.broker.submit_order.assert_called_once()
+
+    def test_submits_on_the_strategys_own_client(self) -> None:
         strat = self._make_strategy(client_name="paper")
         executor, refs = self._make_executor(strat)
 
         executor.enter(
-            strat, "SPY", {"Signal": "BUY_CALL", "Confidence": 0.9}, MagicMock()
+            strat,
+            "SPY",
+            {"Signal": "BUY", "Close": 50.0, "Confidence": 0.9},
+            refs.engine,
         )
 
-        refs.unified_executor.enter_trade.assert_called_once()
+        refs.clients["paper"].submit_order.assert_called_once()
 
-    def test_set_client_called_with_correct_pair(self) -> None:
-        strat = self._make_strategy(client_name="paper1")
-        executor, refs = self._make_executor(strat)
-
-        executor.enter(
-            strat, "SPY", {"Signal": "BUY_CALL", "Confidence": 0.9}, MagicMock()
-        )
-
-        call_args = refs.unified_executor.set_client.call_args
-        assert call_args[0][0] == "paper1"
-        assert call_args[0][1] is refs.clients["paper1"]
-
-    def test_two_strategies_correct_clients_used(self) -> None:
-        from collections import defaultdict
+    def test_two_strategies_submit_on_their_own_clients(self) -> None:
+        from types import SimpleNamespace
 
         strat_paper = self._make_strategy("StratPaper", "paper")
         strat_paper1 = self._make_strategy("StratPaper1", "paper1")
-
-        unified_exec = MagicMock()
-        unified_exec.set_client.return_value = True
-        unified_exec.enter_trade.return_value = None
-        clients = {"paper": MagicMock(), "paper1": MagicMock()}
-        executor = LiveExecutor(
-            last_update={},
-            last_manage_update={},
-            active_positions=defaultdict(list),
-            strategies=[strat_paper, strat_paper1],
+        broker1 = MagicMock()
+        broker1.submit_order.return_value = MagicMock(id="b1")
+        broker2 = MagicMock()
+        broker2.submit_order.return_value = MagicMock(id="b2")
+        clients = {"paper": broker1, "paper1": broker2}
+        equity_mgr = MagicMock()
+        equity_mgr.set_active.return_value = True
+        equity_mgr.get.return_value = 50_000.0
+        engine = MagicMock()
+        engine.direction.return_value = 1
+        engine.build_position.side_effect = lambda *a, **kw: dict(kw)
+        executor = LiveExecutionClient(
+            venue=SimpleNamespace(id="alpaca"),
             clients=clients,
-            unified_executor=unified_exec,
-            lock=MagicMock(),
+            strategies=[strat_paper, strat_paper1],
+            active_positions={},
             logger=MagicMock(),
+            lock=MagicMock(),
             save_state=MagicMock(),
+            equity_mgr=equity_mgr,
         )
+        row = {"Signal": "BUY", "Close": 100.0, "Confidence": 0.9}
 
-        row = {"Signal": "BUY_CALL", "Confidence": 0.9}
-        executor.enter(strat_paper, "SPY", row, MagicMock())
-        executor.enter(strat_paper1, "SPY", row, MagicMock())
+        executor.enter(strat_paper, "SPY", row, engine)
+        executor.enter(strat_paper1, "SPY", row, engine)
 
-        calls = unified_exec.set_client.call_args_list
-        assert calls[0][0][0] == "paper"
-        assert calls[1][0][0] == "paper1"
-        assert unified_exec.enter_trade.call_count == 2
+        broker1.submit_order.assert_called_once()
+        broker2.submit_order.assert_called_once()
 
 
 # Proves active-client selection is per-thread: threads selecting different

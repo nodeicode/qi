@@ -94,8 +94,9 @@ class ExecutorProtocol(Protocol):
     (``process_ticker``, ``run_signals``, ``call_manage_trade``, sizing,
     routing) is identical for both.
 
-    Live implementation wraps ``UnifiedExecutor`` + Alpaca data caches.
-    Backtest implementation wraps prefetched DataFrames + fill simulators.
+    Live implementation wraps the live venue's execution client (the Alpaca
+    data caches + broker submission).  Backtest implementation wraps
+    prefetched DataFrames + fill simulators.
     """
 
     # ── Scheduling ──────────────────────────────────────────────────────

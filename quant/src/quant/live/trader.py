@@ -28,14 +28,11 @@ from typing import Any
 
 from quant.config import ConfigSync, EnvConfigSource, FileConfigSource
 from quant.core.engine import TradingEngine
-from quant.core.protocols import ExecutorProtocol
 from quant.data.data_handler import AlpacaDataHandler
 
 # -----------------------------------------------------------------------------
 # Imports
 # -----------------------------------------------------------------------------
-from quant.live.executors.live_executor import LiveExecutor
-from quant.live.executors.unified_executor import UnifiedExecutor
 from quant.live.market_schedule import MarketSchedule
 from quant.live.protocols import (
     LivePositionDict,
@@ -44,6 +41,7 @@ from quant.live.protocols import (
 )
 from quant.live.strategy_loader import load_strategies
 from quant.live.utils import (
+    MultiClientEquityManager,
     load_state,
     resolve_env,
     save_state,
@@ -51,6 +49,8 @@ from quant.live.utils import (
 )
 from quant.observability import Span, SpanName
 from quant.portfolio import Portfolio
+from quant.venue import AlpacaCalendar, AlpacaVenue
+from quant.venue.live import FillReport, LiveExecutionClient
 
 # -----------------------------------------------------------------------------
 # Logging Setup
@@ -187,15 +187,6 @@ class UnifiedTrader:
         # persisted + recovered alongside the trader state (see _save_state).
         self.portfolio = Portfolio(name="live")
 
-        # Initialize Unified Executor
-        # Pass all registered clients so each account's equity is tracked independently.
-        self.unified_executor = UnifiedExecutor(
-            self.data_handler.clients,
-            self.data_handler,
-            self.logger,
-            portfolio=self.portfolio,
-        )
-
         # Sync Trading Clients (Paper and Live)
         self.clients = self.data_handler.clients
         self.logger.info(
@@ -212,10 +203,37 @@ class UnifiedTrader:
         # exits are evaluated every MANAGE_INTERVAL even when INTERVAL is 1d.
         self.last_manage_update: dict[str, datetime.datetime] = {}
 
-        self._load_local_state()
-
         # RLock guards shared state accessed from process_strategy worker threads.
         self.lock = threading.RLock()
+
+        self._load_local_state()
+
+        # Live venue + execution client (spec `execution` Live orders through
+        # venue-bound clients): the venue is the broker-and-session unit, and the
+        # execution client is the single gated/submission-and-reconcile seam the
+        # shared engine loop dispatches to. The calendar wraps the first trading
+        # client; ``AlpacaVenue`` fails closed when the calendar can't answer.
+        self.venue = AlpacaVenue(
+            data_source=self.data_handler,
+            calendar=AlpacaCalendar(next(iter(self.clients.values()), None)),
+        )
+        self.execution_client = LiveExecutionClient(
+            venue=self.venue,
+            clients=self.clients,
+            strategies=self.strategies,
+            active_positions=self.active_positions,
+            portfolio=self.portfolio,
+            logger=self.logger,
+            lock=self.lock,
+            save_state=self._save_state,
+            last_update=self.last_update,
+            last_manage_update=self.last_manage_update,
+            # Per-account equity isolation for concurrent paper/prod strategies.
+            equity_mgr=MultiClientEquityManager(self.clients, self.logger),
+            # Reconcile fills from the broker's async order surface.
+            fill_resolver=self._broker_fill_resolver,
+        )
+        self.venue.execution_client = self.execution_client
 
         # Purge any IC positions that expired while the trader was offline.
         self._cleanup_expired_positions()
@@ -454,16 +472,59 @@ class UnifiedTrader:
         for k, v in state.get("last_manage_update", {}).items():
             self.last_manage_update[k] = datetime.datetime.fromisoformat(v)
 
+    @staticmethod
+    def _broker_fill_resolver(order_id: str, order, client) -> FillReport:
+        """Reconcile a submitted order from the broker's async order surface.
+
+        Reads ``client.get_order_by_id`` and reports the venue's filled/partial
+        state. A stub/offline client (no usable status string) is treated as a
+        full fill at the resolved price — reconciliation only splits a partial
+        fill when the venue actually says so.
+        """
+        raw = None
+        get_order = getattr(client, "get_order_by_id", None)
+        if get_order is not None:
+            raw = get_order(order_id)
+        status_raw = (
+            raw.get("status") if isinstance(raw, dict) else getattr(raw, "status", None)
+        )
+        if not isinstance(status_raw, str) or not status_raw:
+            return FillReport(
+                order_id, "FILLED", order.quantity, order.quantity, 0.0, None
+            )
+
+        def _num(name: str, default: float | None) -> float | None:
+            value = raw.get(name) if isinstance(raw, dict) else getattr(raw, name, None)
+            if value is None:
+                return default
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return default
+
+        qty = _num("qty", order.quantity) or order.quantity
+        filled = _num("filled_qty", order.quantity) or order.quantity
+        avg = _num("filled_avg_price", None)
+        return FillReport(
+            order_id,
+            str(status_raw).upper(),
+            qty,
+            filled,
+            max(0.0, qty - filled),
+            avg,
+        )
+
     # -------------------------------------------------------------------------
     # Data & Strategy Execution
     # -------------------------------------------------------------------------
     def process_strategy(
         self, strategy: LiveStrategyProtocol, now: datetime.datetime
     ) -> list:
-        """Delegate to ``engine.process_strategy`` via ``LiveExecutor``.
+        """Delegate to ``engine.process_strategy`` via the live execution client.
 
         Scheduling, data fetching, signal generation, and order execution
-        all happen inside this call through the executor hooks.
+        all happen inside this call through the shared live venue client
+        (gated submission + fill reconciliation into the Portfolio).
 
         Exceptions are caught here so that one broken strategy cannot prevent
         others from running in the same tick.  The per-future try/except in
@@ -477,20 +538,7 @@ class UnifiedTrader:
             now = now.astimezone(datetime.UTC).replace(tzinfo=None)
         try:
             engine = self.engines[strategy.name]
-            delay = getattr(strategy.config, "DATA_DELAY", _LIVE_DATA_DELAY_MINUTES)
-            executor: ExecutorProtocol = LiveExecutor(
-                last_update=self.last_update,
-                last_manage_update=self.last_manage_update,
-                active_positions=self.active_positions,
-                strategies=self.strategies,
-                clients=self.clients,
-                unified_executor=self.unified_executor,
-                lock=self.lock,
-                logger=self.logger,
-                save_state=self._save_state,
-                delay_minutes=int(delay),
-            )
-            engine.process_strategy(strategy, now, executor)
+            engine.process_strategy(strategy, now, self.execution_client)
         except Exception as e:
             self.logger.exception(
                 f"[{getattr(strategy, 'name', '?')}] Unhandled error in strategy runner: {e}"

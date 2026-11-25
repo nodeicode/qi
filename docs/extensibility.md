@@ -193,7 +193,7 @@ distinct). No engine modification needed.
 | Strategy | `StrategyProtocol` + one registry / entry-point line | `quant.strategies` |
 | Data source | `DataSourceProtocol` | `quant.venue.base` |
 | Venue | `Venue` / `BaseVenue`, registered by name | `quant.venue` |
-| Execution client | `submit(order) -> Fill`; backtest fills simulated in `quant.venue.backtest` | `quant.venue`, `quant.live.executors` |
+| Execution client | `submit(order) -> Fill`; backtest fills simulated in `quant.venue.backtest`, live fills reconciled in `quant.venue.live` | `quant.venue` |
 | Observability | `Span` + `Emitter` | `quant.observability` |
 | Portfolio | fills-only state machine | `quant.portfolio` |
 | Config | `ConfigSource` backend, registered by name | `quant.config` |

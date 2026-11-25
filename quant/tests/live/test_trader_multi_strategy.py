@@ -10,6 +10,7 @@ import pandas as pd
 from quant.live.protocols import LiveStrategyProtocol
 from quant.live.trader import UnifiedTrader
 from quant.utils.strategy_config import BaseStrategyConfig
+from tests.live.conftest import always_open_venue
 
 # N.B. alpaca is stubbed per-test by the autouse fixture in tests/live/conftest.py.
 sys.path.append(
@@ -74,6 +75,9 @@ class TestUnifiedTraderMultiStrategy(unittest.TestCase):
         }
 
     @patch("quant.live.trader.load_state", return_value={})
+    @patch(
+        "quant.live.trader.AlpacaVenue", side_effect=lambda *a, **k: always_open_venue()
+    )
     @patch("quant.live.trader.AlpacaDataHandler")
     @patch("quant.live.trader.MarketSchedule")
     @patch("quant.live.trader.load_strategies")
@@ -82,6 +86,7 @@ class TestUnifiedTraderMultiStrategy(unittest.TestCase):
         mock_load_strategies,
         mock_schedule_cls,
         mock_dh_cls,
+        mock_venue_cls,
         mock_load_state,
     ):
         mock_dh_cls.return_value = self.mock_data_handler
@@ -93,10 +98,10 @@ class TestUnifiedTraderMultiStrategy(unittest.TestCase):
 
         trader = UnifiedTrader()
         trader.clients = {"paper": self.mock_client, "prod": self.mock_client}
-        trader.unified_executor.equity_mgr.get = MagicMock(return_value=100_000.0)
-        trader.unified_executor.equity_mgr.debit = MagicMock()
-        trader.unified_executor.equity_mgr.credit = MagicMock()
-        trader.unified_executor.equity_mgr.set_active = MagicMock(return_value=True)
+        trader.execution_client.equity_mgr.get = MagicMock(return_value=100_000.0)
+        trader.execution_client.equity_mgr.debit = MagicMock()
+        trader.execution_client.equity_mgr.credit = MagicMock()
+        trader.execution_client.equity_mgr.set_active = MagicMock(return_value=True)
 
         now = datetime.datetime.now(datetime.UTC).replace(second=0, microsecond=0)
         # UTC-naive minute bars aligned with closed_bar_asof floor semantics.
@@ -111,7 +116,9 @@ class TestUnifiedTraderMultiStrategy(unittest.TestCase):
         mock_order.id = "order_1"
         self.mock_client.submit_order.return_value = mock_order
 
-        # process_strategy now handles execution inline via engine + LiveExecutor.
+        # process_strategy now handles execution inline via engine + the live
+        # venue's execution client (the venue is replaced by an always-open
+        # stub so gated submission never blocks the asserted broker calls).
         trader.process_strategy(s1, now)
         trader.process_strategy(s2, now)
 
