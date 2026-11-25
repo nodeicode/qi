@@ -73,8 +73,8 @@ class DataHandlerProtocol(Protocol):
     ) -> pd.DataFrame:
         """Fetch OHLCV bars for *ticker* over ``[start, end]``.
 
-        The engine-owned fetch path (``fetch_data`` / ``fetch_manage_data``)
-        still consumes this while the engine is migrated to subscription
-        buffers; it resolves to the same bars as :meth:`get_data`.
+        Convenience alias resolving to the same bars as :meth:`get_data` (the
+        backtester uses it for the raw manage frame; the engine consumes the
+        subscription surface directly).
         """
         ...

@@ -1,10 +1,16 @@
-"""Contract coverage for the shared Span timing primitives (plan §1).
+"""Contract coverage for the shared Span timing primitives.
 
 Guards: (a) ``Span`` records monotonic ns and is a no-op when ``emit=None``;
 (b) ``collect`` buckets nested spans deterministically; (c) the ``@span``
 decorator wraps without masking exceptions; (d) the determinism guard — every
 ``SpanName`` maps into ``SPAN_KEYS`` and the latency-SLO rollup set
 ``SLO_SPAN_KEYS ⊆ SPAN_KEYS`` with exactly the two non-SLO spans excluded.
+
+The span set is the reshaped declarative path's set (``DECIDE`` /
+``DECISION_SUBMIT`` for the author body + its submission, the loop/latency
+series, and the off-path ``WARMUP_TOTAL``). The legacy spans the deleted
+signal/manage machinery timed (``RUN_SIGNALS`` / ``PROCESS_TICKER`` /
+``EXECUTION_DISPATCH`` and the fetch spans) are gone with those methods.
 """
 
 from __future__ import annotations
@@ -22,12 +28,12 @@ from quant.observability import (
     span_key,
 )
 
-_NON_SLO_KEYS = {"execution_dispatch_ns", "warmup_total_ns"}
+_NON_SLO_KEYS = {"decision_submit_ns", "warmup_total_ns"}
 
 
 def test_span_key_matches_enum_values() -> None:
-    assert span_key(SpanName.GENERATE_SIGNALS) == "generate_signals_ns"
-    assert span_key(SpanName.EXECUTION_DISPATCH) == "execution_dispatch_ns"
+    assert span_key(SpanName.DECIDE) == "decide_ns"
+    assert span_key(SpanName.DECISION_SUBMIT) == "decision_submit_ns"
     assert span_key(SpanName.WARMUP_TOTAL) == "warmup_total_ns"
 
 
@@ -36,17 +42,12 @@ def test_registry_is_exact_closed_set() -> None:
     assert (
         frozenset(
             {
-                "generate_signals_ns",
-                "strategy_calc_total_ns",
-                "fetch_data_ns",
-                "fetch_manage_data_ns",
-                "run_signals_ns",
-                "process_ticker_ns",
+                "decide_ns",
+                "decision_submit_ns",
                 "tick_elapsed_ns",
                 "tick_dispatch_ns",
                 "main_loop_lag_ns",
                 "queue_lag_ns",
-                "execution_dispatch_ns",
                 "warmup_total_ns",
             }
         )
@@ -67,26 +68,25 @@ def test_slo_keys_subset_and_exact_non_slo_exclusion() -> None:
 
 def test_span_event_merges_span_key_into_payload_on_exit() -> None:
     """``event`` base-dict form: emitted payload is ``{**event, name_ns}`` with
-    dynamic fields mutated inside the block merged at exit (execution_dispatch)."""
+    dynamic fields mutated inside the block merged at exit (decision_submit)."""
     events: list[dict] = []
 
     def emit(event: dict) -> None:
         events.append(event)
 
-    evt = {"kind": "execution_dispatch", "action": "entry"}
-    with Span(SpanName.EXECUTION_DISPATCH, emit=emit, event=evt):
-        new_pos = True
-        evt["accepted"] = bool(new_pos)
+    evt = {"kind": "decision_submit", "accepted": False}
+    with Span(SpanName.DECISION_SUBMIT, emit=emit, event=evt):
+        new_fill = True
+        evt["accepted"] = bool(new_fill)
 
     assert len(events) == 1
     (payload,) = events
-    assert payload["kind"] == "execution_dispatch"
-    assert payload["action"] == "entry"
+    assert payload["kind"] == "decision_submit"
     assert payload["accepted"] is True
-    assert "execution_dispatch_ns" in payload
-    assert payload["execution_dispatch_ns"] >= 0
+    assert "decision_submit_ns" in payload
+    assert payload["decision_submit_ns"] >= 0
     # caller's dict is not mutated with the span key (fresh merge at exit)
-    assert "execution_dispatch_ns" not in evt
+    assert "decision_submit_ns" not in evt
 
 
 def test_span_records_monotonic_ns() -> None:
@@ -95,7 +95,7 @@ def test_span_records_monotonic_ns() -> None:
     def emit(event: dict[str, int]) -> None:
         events.append(event)
 
-    with Span(SpanName.FETCH_DATA, emit=emit) as sp:
+    with Span(SpanName.DECIDE, emit=emit) as sp:
         elapsed = sp.elapsed_ns()
         assert elapsed >= 0
         start = time.perf_counter_ns()
@@ -104,20 +104,20 @@ def test_span_records_monotonic_ns() -> None:
 
     assert len(events) == 1
     (event,) = events
-    assert set(event) == {"fetch_data_ns"}
-    assert event["fetch_data_ns"] > 0
+    assert set(event) == {"decide_ns"}
+    assert event["decide_ns"] > 0
     # emitted elapsed equals what was observed inside the block
-    assert event["fetch_data_ns"] > elapsed
+    assert event["decide_ns"] > elapsed
 
 
 def test_span_emit_none_is_noop() -> None:
     # No exception, nothing emitted, no collect bucket.
-    with Span(SpanName.PROCESS_TICKER, emit=None):
+    with Span(SpanName.DECIDE, emit=None):
         pass
-    with Span(SpanName.PROCESS_TICKER):
+    with Span(SpanName.DECIDE):
         pass
     # Reuse across multiple entries stays safe.
-    sp = Span(SpanName.RUN_SIGNALS)
+    sp = Span(SpanName.DECISION_SUBMIT)
     with sp:
         pass
     with sp:
@@ -125,29 +125,29 @@ def test_span_emit_none_is_noop() -> None:
 
 
 def test_span_elapsed_zero_when_not_entered() -> None:
-    sp = Span(SpanName.FETCH_DATA)
+    sp = Span(SpanName.DECIDE)
     assert sp.elapsed_ns() == 0
 
 
 def test_collect_buckets_nested_spans_deterministically() -> None:
     bucket: dict[str, int] = {}
-    with Span(SpanName.STRATEGY_CALC_TOTAL, collect=bucket):
-        with Span(SpanName.GENERATE_SIGNALS, collect=bucket):
+    with Span(SpanName.TICK_ELAPSED, collect=bucket):
+        with Span(SpanName.DECIDE, collect=bucket):
             time.sleep(0.001)
-        with Span(SpanName.FETCH_MANAGE_DATA, collect=bucket):
+        with Span(SpanName.DECISION_SUBMIT, collect=bucket):
             time.sleep(0.001)
     assert set(bucket) == {
-        "strategy_calc_total_ns",
-        "generate_signals_ns",
-        "fetch_manage_data_ns",
+        "tick_elapsed_ns",
+        "decide_ns",
+        "decision_submit_ns",
     }
     # Outer span strictly dominates each nested span even with 1ms sleeps.
-    assert bucket["strategy_calc_total_ns"] > bucket["generate_signals_ns"]
-    assert bucket["strategy_calc_total_ns"] > bucket["fetch_manage_data_ns"]
+    assert bucket["tick_elapsed_ns"] > bucket["decide_ns"]
+    assert bucket["tick_elapsed_ns"] > bucket["decision_submit_ns"]
     # Repeated entry with the same bucket overwrites deterministically.
-    with Span(SpanName.GENERATE_SIGNALS, collect=bucket):
+    with Span(SpanName.DECIDE, collect=bucket):
         pass
-    assert bucket["generate_signals_ns"] >= 0
+    assert bucket["decide_ns"] >= 0
 
 
 def test_decorator_wraps_and_preserves_metadata() -> None:
@@ -156,7 +156,7 @@ def test_decorator_wraps_and_preserves_metadata() -> None:
     def emit(event: dict[str, int]) -> None:
         events.append(event)
 
-    @span(SpanName.RUN_SIGNALS, emit=emit)
+    @span(SpanName.DECISION_SUBMIT, emit=emit)
     def run(scale: int) -> int:
         """Docstring must survive wrapping."""
         return scale * 2
@@ -165,8 +165,8 @@ def test_decorator_wraps_and_preserves_metadata() -> None:
     assert run.__doc__ == "Docstring must survive wrapping."
     assert run(21) == 42
     assert len(events) == 1
-    assert set(events[0]) == {"run_signals_ns"}
-    assert events[0]["run_signals_ns"] > 0
+    assert set(events[0]) == {"decision_submit_ns"}
+    assert events[0]["decision_submit_ns"] > 0
 
 
 def test_decorator_does_not_mask_exceptions() -> None:
@@ -175,7 +175,7 @@ def test_decorator_does_not_mask_exceptions() -> None:
     def emit(event: dict[str, int]) -> None:
         events.append(event)
 
-    @span(SpanName.PROCESS_TICKER, emit=emit)
+    @span(SpanName.DECIDE, emit=emit)
     def boom() -> None:
         raise ValueError("boom")
 
@@ -183,4 +183,4 @@ def test_decorator_does_not_mask_exceptions() -> None:
         boom()
     # The span still emitted before the exception propagated.
     assert len(events) == 1
-    assert set(events[0]) == {"process_ticker_ns"}
+    assert set(events[0]) == {"decide_ns"}

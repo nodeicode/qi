@@ -73,11 +73,15 @@ def _engine() -> TradingEngine:
 
 
 def _spy_client(submitted: list[Order]):
-    """A minimal execution client that captures submitted orders."""
+    """A minimal execution client that captures submitted orders.
+
+    Accepts (and ignores) the shared-loop ``now``/``cadence`` kwargs the engine
+    passes through the typed-order seam.
+    """
     return type(
         "SpyClient",
         (),
-        {"submit": lambda self, order: submitted.append(order) or None},
+        {"submit": lambda self, order, **kwargs: submitted.append(order) or None},
     )()
 
 
@@ -115,7 +119,7 @@ class TestOrderReachesVenue:
         submissions: list[Order] = []
 
         class _Client:
-            def submit(self, order):
+            def submit(self, order, **kwargs):
                 submissions.append(order)
                 return None  # a rejected order still consumes the submit slot
 

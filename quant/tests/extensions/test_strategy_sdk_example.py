@@ -1,9 +1,11 @@
-"""Guards the add-a-strategy example in ``agents/strategy-sdk.md`` (task 6.4).
+"""Guards the add-a-strategy example in ``agents/strategy-sdk.md``.
 
 The exact strategy / config / registry / engine / backtest steps documented in
 that agent doc are reproduced here so the doc's example is backed by a real
 green test, and the spec `strategy-sdk` scenarios (missing method rejected,
-wrong config-type rejected, valid strategy accepted) hold for it.
+wrong config-type rejected, valid strategy accepted) hold for it. The example
+strategy is written against the declarative surface: typed instrument +
+``bars`` subscription + a venue, with a single author body ``decide``.
 """
 
 from __future__ import annotations
@@ -17,21 +19,31 @@ import pytest
 
 from quant.backtest.backtester import Backtester
 from quant.core.engine import TradingEngine
-from quant.core.protocols import PositionDict
+from quant.data import Datatype, Subscription
+from quant.instruments import EquityInstrument
+from quant.portfolio import Side
 from quant.strategies import STRATEGY_REGISTRY, get_strategy
+from quant.strategies.base import ExitIntent, Strategy
 from quant.utils.strategy_config import BaseStrategyConfig
 
 
 # ── the doc's example strategy (mirrors agents/strategy-sdk.md) ──────────────
+def _demo_instrument() -> EquityInstrument:
+    """The traded equity instrument (venue ``backtest``, one-lot precision)."""
+    return EquityInstrument(
+        symbol="SPY",
+        venue="backtest",
+        price_precision=2,
+        lot_size=1,
+    )
+
+
 @dataclass
 class DemoMAConfig(BaseStrategyConfig):
-    """A moving-average strategy's config: the same fields, plus MA windows."""
+    """A moving-average strategy's config: framework fields + MA windows."""
 
-    INTERVAL: str = "1d"
-    MANAGE_INTERVAL: str = "1d"
     PRE_LOAD_DAYS: int = 60
     INITIAL_CAPITAL: float = 100_000.0
-    CAPITAL_PER_TRADE: float = 0.5
     MAX_CONCURRENT_POSITIONS: int = 1
     STOP_LOSS_PERCENT: float = 0.05
     TAKE_PROFIT_PERCENT: float = -1.0  # disabled sentinel
@@ -39,44 +51,58 @@ class DemoMAConfig(BaseStrategyConfig):
     MAX_HOLDING_MINUTES: int = 60 * 24 * 30
     MIN_SIGNAL_CONFIDENCE: float = 0.0
     BASE_SLIPPAGE_FACTOR: float = 0.001
-    TICKERS: list[str] = field(default_factory=lambda: ["SPY"])
-    DATA_DELAY: int = 0
+
+    # --- Declarative declarations ---
+    instruments: list = field(default_factory=lambda: [_demo_instrument()])
+    subscriptions: list = field(
+        default_factory=lambda: [
+            Subscription(
+                instrument=_demo_instrument(),
+                datatype=Datatype.BARS,
+                cadence="1d",
+            )
+        ]
+    )
+    venue: str = "backtest"
 
     # strategy-specific params
     FAST_WINDOW: int = 5
     SLOW_WINDOW: int = 20
 
 
-class DemoMAStrategy:
-    """Fast>slow → BUY. One registry line; runs identical in backtest and live."""
+class DemoMAStrategy(Strategy):
+    """Fast>slow → BUY, fast<slow → exit. One registry line; runs identically
+    in backtest and live (the engine + venue are the only seams)."""
 
-    name = "demo_ma"
-    INDICATOR_COLUMNS: ClassVar[list[str]] = ["FAST", "SLOW"]
+    name: ClassVar[str] = "demo_ma"
 
     def __init__(self, config: DemoMAConfig | None = None) -> None:
         self.config = config or DemoMAConfig()
+        # Mirror the declared config onto the instance surface the engine and
+        # data port read (instruments / subscriptions / venue).
+        self.instruments: list = list(self.config.instruments)
+        self.subscriptions: list = list(self.config.subscriptions)
+        self.venue: str = self.config.venue or "backtest"
+        super().__init__()
 
-    def calculate_indicators(self, df: pd.DataFrame, **kw) -> pd.DataFrame:
-        out = df.copy()
-        out["FAST"] = out["Close"].rolling(self.config.FAST_WINDOW).mean()
-        out["SLOW"] = out["Close"].rolling(self.config.SLOW_WINDOW).mean()
+    def decide(self, events, portfolio) -> list:
+        """Author body: exit on fast<slow, enter on fast>slow (no position)."""
+        bars = events.bars("SPY")
+        if bars is None or bars.empty:
+            return []
+        close = bars["Close"]
+        fast = close.rolling(self.config.FAST_WINDOW).mean()
+        slow = close.rolling(self.config.SLOW_WINDOW).mean()
+        if len(fast) < 2 or pd.isna(fast.iloc[-1]) or pd.isna(slow.iloc[-1]):
+            return []
+        out: list = []
+        for pos in portfolio.open_positions(self.name):
+            if fast.iloc[-1] < slow.iloc[-1]:
+                out.append(ExitIntent(self.name, pos, reason="fast<slow"))
+        if fast.iloc[-1] > slow.iloc[-1] and not portfolio.open_positions(self.name):
+            instrument = self.config.instruments[0]
+            out.append(instrument.make_order(Side.BUY, 100, strategy=self.name))
         return out
-
-    def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
-        out = df.copy()
-        out["Signal"] = "NEUTRAL"
-        out["Confidence"] = 0.0
-        out["Reason"] = ""
-        if out.empty or "SLOW" not in out.columns:
-            return out
-        mode = out["FAST"] > out["SLOW"]
-        out.loc[mode, "Signal"] = "BUY"
-        out.loc[mode, "Confidence"] = 1.0
-        out.loc[mode, "Reason"] = "fast>slow"
-        return out
-
-    def manage_trade(self, position: PositionDict, df: pd.DataFrame) -> int:
-        return -1
 
 
 class SynthDataHandler:
@@ -95,6 +121,10 @@ class SynthDataHandler:
             },
             index=idx,
         )
+
+    def get_data(self, subscription, start, end, use_cache=True, adjustment=None):
+        del subscription, use_cache, adjustment
+        return self.get_historical_data("SPY", start, end, "1d")
 
     def get_historical_data(
         self,
@@ -118,12 +148,32 @@ def test_valid_strategy_accepted() -> None:
     assert engine.strategy is strategy
 
 
-def test_run_signals_injects_indicators_and_buys() -> None:
-    engine = TradingEngine(DemoMAStrategy(), SynthDataHandler())
-    df = SynthDataHandler().get_historical_data("SPY", "2023-10-01", "2024-06-28", "1d")
-    signals = engine.run_signals(df, ticker="SPY")
-    assert {"FAST", "SLOW"}.issubset(signals.columns)
-    assert (signals["Signal"] == "BUY").sum() >= 1
+def test_engine_drives_decide_and_buys() -> None:
+    """The engine serves closed bars to ``decide`` and submits the BUY order.
+
+    Runs the offline backtest and asserts the decision transcript contains a
+    typed BUY order (the declarative replacement for the legacy
+    indicator-injection ``run_signals`` behavior).
+    """
+    cfg = DemoMAConfig()
+    bt = Backtester(
+        cfg,
+        DemoMAStrategy(cfg),
+        "2024-01-02",
+        "2024-06-28",
+        "SPY",
+        data_handler=SynthDataHandler(),
+    )
+    trades = bt.run_backtest()
+    assert len(trades) >= 1
+    transcript = bt.engine.transcript
+    order_sides = [
+        item["side"]
+        for entry in transcript
+        for item in entry.get("decisions", [])
+        if item.get("kind") == "order"
+    ]
+    assert any(side.lower() == "buy" for side in order_sides)
 
 
 def test_missing_methods_construct_with_declarative_surface() -> None:

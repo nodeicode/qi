@@ -2,24 +2,27 @@
 Unified Backtester — environment adapter over the backtest venue.
 ================================================================
 
-Architecture:
+Architecture (declarative, strategy-dataflow):
 
-  1. **Data fetch** — signal-resolution + manage-resolution bars prefetched
-     upfront via ``_prefetch_data``.
-  2. **Per-bar loop** — ``engine.process_strategy(strategy, now, client)``
-     drives scheduling, signals, manage, entry gating.  The backtest venue's
-     execution client (``BacktestExecutionClient`` in ``quant/venue/backtest.py``)
-     is the fill seam the engine loop dispatches to.
-  3. **Fill simulation** — the client owns enter/exit, the end-of-run
-     forced-close, and the run ledger (positions, trade log, running equity)
-     the equity curve and metrics read back.
+  1. **Data prefetch** — each declared ``(instrument, datatype, cadence)``
+     subscription is fetched once upfront via ``_prefetch_data`` and seeded
+     into a per-run ``BacktestDataHandler`` (replay, no re-parse per bar).
+  2. **Per-bar loop** — the union of the subscriptions' closed-bar timestamps
+     drives ``engine.process_strategy(strategy, now, venue)`` per tick: the
+     engine serves closed bars from the seeded handler, drives the author body
+     ``decide``, and submits typed orders to the backtest venue's execution
+     client (the fill seam) — the exact same code path the live trader runs.
+  3. **Fill simulation** — ``BacktestExecutionClient.submit`` prices fills in
+     tradable space, end-of-run ``force_close_remaining`` closes stragglers,
+     and the run ledger (positions, trade log, running equity) feeds
+     ``Backtester.compute_equity_curve`` / ``calculate_performance_metrics``.
 
 A single ``run_backtest`` drives everything.
 
 Usage
 -----
 >>> from quant.backtest import Backtester
->>> bt = Backtester(config, strategy, "2024-01-01", "2024-06-01", "AAPL")
+>>> bt = Backtester(config, strategy, "2024-01-01", "2024-06-01", "SPY")
 >>> trades = bt.run_backtest()
 >>> bt.compute_equity_curve()
 >>> metrics = bt.calculate_performance_metrics()
@@ -28,7 +31,7 @@ Usage
 from __future__ import annotations
 
 import logging
-from typing import Any, Literal, cast
+from typing import cast
 
 import pandas as pd
 
@@ -36,8 +39,7 @@ from quant.backtest.backtest_data_handler import BacktestDataHandler
 from quant.backtest.base_backtest import BaseBacktester
 from quant.core.engine import TradingEngine
 from quant.core.protocols import DataHandlerProtocol
-from quant.data.subscription import Datatype, Subscription
-from quant.instruments import EquityInstrument
+from quant.data.subscription import Subscription
 from quant.utils.strategy_config import BaseStrategyConfig
 from quant.venue import (
     BacktestExecutionClient,
@@ -45,16 +47,11 @@ from quant.venue import (
     venue_by_name,
     venue_registered,
 )
+from quant.venue.base import to_utc_naive
 
 
 class Backtester(BaseBacktester):
-    """Unified backtester driving ``engine.process_strategy`` via the venue client.
-
-    ``engine.route(signal)`` retains the legacy signal→asset-class mapping
-    until the routing swap lands; fills are simulated by the backtest venue's
-    execution client, which also owns the end-of-run forced-close and the run
-    ledger (positions, trade log, running equity).
-    """
+    """Unified backtester driving ``engine.process_strategy`` via the backtest venue."""
 
     def __init__(
         self,
@@ -71,15 +68,20 @@ class Backtester(BaseBacktester):
         super().__init__(
             config, strategy, start_date, end_date, ticker, verbose, data_handler
         )
-        # Portfolio-collecting mode (spec `portfolio`): when set, simulated
-        # fills stream into this Portfolio — the same primitives as live.
+
+        # The account the author body sizes/exits against (spec `portfolio`):
+        # simulated fills stream into this Portfolio through the venue client,
+        # and the engine injects its read-only view into ``decide``. Defaults to
+        # a private portfolio so non-portfolio runs still close positions.
         self.portfolio = portfolio
+        if self.portfolio is None:
+            from quant.portfolio import Portfolio
+
+            self.portfolio = Portfolio(starting_equity=float(self.initial_capital))
 
         # Resolve the declared venue id at construction (spec `execution` Venue
-        # resolved from the strategy declaration): only a registered id builds
-        # a run and an unknown id fails loudly with the registered ids.
-        # Precedence: the strategy's declared venue, then the explicit
-        # constructor arg, else the backtest default.
+        # resolved from the strategy declaration): a registered id builds a run
+        # and an unknown id fails loudly with the registered ids.
         _declared = getattr(strategy, "venue", "") or getattr(
             getattr(strategy, "config", None), "venue", ""
         )
@@ -89,17 +91,11 @@ class Backtester(BaseBacktester):
                 f"Unknown venue {_declared_id!r}; registered venues: "
                 f"{registered_venues()}"
             )
-        # The backtest run always fills through the deterministic simulation-timeline
-        # venue (the only venue that must answer from the injected ``now``); its
-        # ``data_source``/``execution_client`` are wired when the execution client is
-        # built (``_build_execution_client``).
+        # The run always fills through the deterministic simulation-timeline
+        # venue; its data source / execution client are wired in ``_simulate``.
         self._venue = venue_by_name("backtest")
-        # ``venue`` is the resolved venue id used as the fill/position label.
         self.venue = self._venue.id
 
-        # When verbose, also surface logs from engine + data + strategy loggers so
-        # internal decisions (signal gating, manage_trade, fills) are visible
-        # alongside backtest logs — makes it easy to spot errors end-to-end.
         if verbose:
             _verbose_handler = logging.StreamHandler()
             _verbose_handler.setFormatter(
@@ -116,7 +112,6 @@ class Backtester(BaseBacktester):
                     for h in _lg.handlers
                 ):
                     _lg.addHandler(_verbose_handler)
-            # Strategy logger (supports .logger or ._log attribute)
             for _attr in ("logger", "_log"):
                 _strat_log = getattr(self.strategy, _attr, None)
                 if isinstance(_strat_log, logging.Logger):
@@ -129,59 +124,35 @@ class Backtester(BaseBacktester):
                         _strat_log.addHandler(_verbose_handler)
                     break
 
-        self._asset_class: str = "EQUITY"
-
-        # Simulation state (mirrors trader.active_positions / running equity)
-        self._active_positions: list[dict] = []
+        # Simulation state.
         self._running_equity: float = float(self.initial_capital)
-        self._collateral_in_use: float = 0.0
 
-        data_handler = BacktestDataHandler(
-            df_signals=pd.DataFrame(),  # placeholder, engine caches full df in _simulate
-            df_manage=pd.DataFrame(),  # placeholder, engine caches full df in _simulate
-            signal_interval="",
-            manage_interval="",
-        )
-
-        # Initialize engine to use
+        # Per-run data handler: seeded once with the subscription replay
+        # buffers, then serves window slices with no re-parse per bar.
         self.engine = TradingEngine(
-            self.strategy, cast("DataHandlerProtocol", data_handler)
+            self.strategy, cast("DataHandlerProtocol", self.data_handler)
         )
+        self.engine.portfolio = self.portfolio
 
-        # Pre-fetched caches (populated in _prepare_data)
+        # Raw 1h manage frame the execution client prices fills from (tradable).
         self._df_manage: pd.DataFrame = pd.DataFrame()
-        self._df_manage_1m: pd.DataFrame = pd.DataFrame()
-        # Subscription-keyed replay buffers fed once by ``_prefetch_data`` and
-        # seeded into the per-run data handler so ``get_data`` replays them.
-        self._subscription_buffers: dict[tuple, pd.DataFrame] = {}
+        # ``(Subscription, frame)`` pairs fed by ``_prefetch_data`` and seeded
+        # into the per-run data handler in ``_simulate``.
+        self._sub_frames: list[tuple[Subscription, pd.DataFrame]] = []
 
     # ==================================================================
     # Public API
     # ==================================================================
 
     def run_backtest(self) -> pd.DataFrame:
-        """Single loop driving all asset classes — mirrors ``trader.py``.
+        """Drive the declarative engine over the subscription timeline.
 
-        1. Prepare signals (via ``engine.run_signals`` — same as live).
-        2. Detect dominant asset class and prefetch manage data if needed.
-        3. Iterate signals: call ``engine.process_strategy`` per bar → the
-           backtest venue's execution client simulates entries/exits.
+        1. Prefetch each declared subscription's windows (replay buffers).
+        2. Seed the per-run data handler + wire the venue.
+        3. Per bar: ``engine.process_strategy`` → the venue simulates fills.
         """
-        # Single prepare path for all strategies (signals + Raw_Close).
-        df_signals = self.prepare_signals()
-
-        if df_signals.empty:
-            return pd.DataFrame()
-
-        self._asset_class = self._detect_asset_class(df_signals)
-        self.logger.info(f"Asset class: {self._asset_class}")
-
-        # Prefetch manage-data upfront (same as live's data caching)
-        self._prefetch_data(df_signals)
-
-        # Main simulation loop — mirrors trader.process_strategy
-        self._simulate(df_signals)
-
+        self._prefetch_data()
+        self._simulate()
         self.log_reason_statistics()
         return pd.DataFrame(self.trade_log)
 
@@ -195,148 +166,127 @@ class Backtester(BaseBacktester):
         return super().calculate_performance_metrics(benchmark_ticker)
 
     # ==================================================================
+    # Declared surface resolution
+    # ==================================================================
+
+    def _resolve_subscriptions(self) -> list[Subscription]:
+        config = getattr(self.strategy, "config", None)
+        subs = list(getattr(config, "subscriptions", None) or [])
+        if not subs:
+            subs = list(getattr(self.strategy, "subscriptions", None) or [])
+        return [s for s in subs if isinstance(s, Subscription)]
+
+    # ==================================================================
+    # Data preparation — mirrors the live data source, per subscription
+    # ==================================================================
+
+    def _prefetch_data(self) -> None:
+        """Fetch each declared subscription's window once (no re-parse per bar).
+
+        The signal cadence's bars also seed the raw manage frame the execution
+        client prices tradable-space fills from.
+        """
+        subs = self._resolve_subscriptions()
+        preload_start = (
+            pd.Timestamp(self.start_date) - pd.Timedelta(days=self.config.PRE_LOAD_DAYS)
+        ).isoformat()
+        for sub in subs:
+            frame = self._fulfill(sub, preload_start, self.end_date)
+            self._sub_frames.append((sub, frame))
+        cadence = subs[0].cadence if subs else "1h"
+        self._df_manage = self.data_handler.get_historical_data(
+            ticker=self.ticker,
+            start=preload_start,
+            end=self.end_date,
+            interval=cadence,
+        )
+        if self._df_manage is not None and not self._df_manage.empty:
+            self._df_manage = self._df_manage.sort_index()
+        elif self._df_manage is None:
+            self._df_manage = pd.DataFrame()
+
+    def _fulfill(self, sub: Subscription, start: str, end: str) -> pd.DataFrame:
+        """Fulfill one subscription over ``[start, end]`` on the injected handler."""
+        get_data = getattr(self.data_handler, "get_data", None)
+        if get_data is not None:
+            frame = get_data(sub, start, end)
+            if frame is not None and not frame.empty:
+                return frame.sort_index()
+        frame = self.data_handler.get_historical_data(
+            ticker=sub.instrument.symbol,
+            start=start,
+            end=end,
+            interval=sub.cadence,
+        )
+        if frame is None:
+            return pd.DataFrame()
+        return frame.sort_index()
+
+    # ==================================================================
     # Core loop — drives engine.process_strategy per bar
     # ==================================================================
 
-    def _build_execution_client(
-        self, df_signals: pd.DataFrame
-    ) -> BacktestExecutionClient:
-        """Bundle the run ledger + bar frames into the backtest fill engine.
-
-        The run ledger (positions, trade log, running equity) is injected by
-        reference — the same pattern as before — so ``Backtester`` keeps its
-        own ``trade_log`` / positions attributes for the equity curve and
-        metrics, and syncs the run's equity back after ``force_close_remaining``.
-        """
+    def _build_execution_client(self) -> BacktestExecutionClient:
+        """Bundle the run ledger + raw bar frames into the backtest fill engine."""
         client = BacktestExecutionClient(
             config=getattr(self.strategy, "config", self.config),
             ticker=self.ticker,
             logger=self.logger,
-            df_signals=df_signals,
+            df_signals=self._df_manage,
             df_manage=self._df_manage,
-            df_manage_1m=self._df_manage_1m,
-            active_positions=self._active_positions,
+            active_positions=[],
             trade_log=self.trade_log,
             starting_equity=self._running_equity,
             running_equity=self._running_equity,
-            collateral_in_use=self._collateral_in_use,
             portfolio=self.portfolio,
             venue=self.venue,
             update_reason_stats=self.update_reason_stats,
         )
-        # Wire the resolved venue's data source + execution client so the venue
-        # handed to ``process_strategy`` actually carries the fill seam.
-        self._venue.data_source = self.data_handler
-        self._venue.execution_client = client
         return client
 
-    def _simulate(self, df_signals: pd.DataFrame):
+    def _timeline(self) -> list[pd.Timestamp]:
+        """Sorted union of closed-bar timestamps (>= run start) across subscriptions.
+
+        This is the cadence the per-bar loop iterates; the engine's per-subscription
+        cadence gate then decides which subscriptions are due on each tick, so a
+        manage-resolution tick between signal bars simply skips the signal work.
+        """
+        start = pd.Timestamp(self.start_date)
+        stamps: set[pd.Timestamp] = set()
+        for _sub, frame in self._sub_frames:
+            if frame is None or frame.empty:
+                continue
+            for idx in frame.index:
+                ts = to_utc_naive(pd.Timestamp(idx))
+                if ts >= start:
+                    stamps.add(ts)
+        return sorted(stamps)
+
+    def _simulate(self) -> None:
         """Per-bar loop calling ``engine.process_strategy`` — full live parity.
 
         The engine's orchestration runs identically here and in ``trader.py``;
-        the backtest venue's execution client is the fill seam it dispatches
-        to, and owns the end-of-run forced-close.
+        the backtest venue's execution client is the fill seam it submits to,
+        and owns the end-of-run forced-close.
         """
-
-        # Engine fetches bar data via ``self.data_handler``; in backtest
-        # that's a thin wrapper over the pre-loaded DataFrames.
-        signal_interval: Any | Literal["1h"] = getattr(
-            self.strategy.config, "INTERVAL", "1h"
-        )
-        manage_interval = getattr(
-            self.strategy.config, "MANAGE_INTERVAL", signal_interval
-        )
-
         data_handler = BacktestDataHandler(
-            df_signals=df_signals,
-            df_manage=self._df_manage,
-            signal_interval=signal_interval,
-            manage_interval=manage_interval,
+            df_signals=pd.DataFrame(),
+            df_manage=pd.DataFrame(),
+            signal_interval="",
+            manage_interval="",
         )
         # Replay the pre-fetched subscription buffers (fed once in
-        # ``_prefetch_data``) so ``get_data`` windows them with no re-parse.
-        for (
-            venue,
-            symbol,
-            datatype,
-            cadence,
-        ), frame in self._subscription_buffers.items():
-            data_handler.seed(
-                Subscription(
-                    instrument=EquityInstrument(symbol=symbol, venue=venue),
-                    datatype=datatype,
-                    cadence=cadence,
-                ),
-                frame,
-            )
+        # ``_prefetch_data``) so the engine window reads them with no re-parse.
+        for sub, frame in self._sub_frames:
+            data_handler.seed(sub, frame)
+        self.engine.data_handler = cast("DataHandlerProtocol", data_handler)
+        self._venue.data_source = data_handler
+        self._venue.execution_client = self._build_execution_client()
 
-        self.engine.data_handler = cast(
-            "DataHandlerProtocol", data_handler
-        )  # inject preloaded data handler
+        for ts in self._timeline():
+            self.engine.process_strategy(self.strategy, ts, self._venue)
 
-        # Cache full signal df for indicator injection inside call_manage_trade.
-        self.engine.cache_signals(self.ticker, df_signals)
-
-        client = self._build_execution_client(df_signals)
-
-        # engine.process_strategy reads strategy.config.TICKERS — restrict
-        # to the single backtest ticker for the duration of the run so
-        # other tickers (if any) don't trigger empty fetches.
-        cfg = self.strategy.config
-        prev_tickers = getattr(cfg, "TICKERS", None)
-        try:
-            cfg.TICKERS = [self.ticker]
-            for ts, _row in df_signals.iterrows():
-                ts = cast("pd.Timestamp", ts)
-                self.engine.process_strategy(self.strategy, ts, self._venue)
-        finally:
-            if prev_tickers is None:
-                if hasattr(cfg, "TICKERS"):
-                    try:
-                        delattr(cfg, "TICKERS")
-                    except AttributeError:
-                        cfg.TICKERS = []
-            else:
-                cfg.TICKERS = prev_tickers
-
-        # Close positions still active at end of backtest window.
-        client.force_close_remaining()
+        # Close positions still active at end of the backtest window.
+        self._venue.execution_client.force_close_remaining()
         # Sync ledger results back to the backtester.
-        self._running_equity = client.running_equity
-        self._collateral_in_use = client.collateral_in_use
-
-    # ==================================================================
-    # Data preparation — mirrors trader.py data fetching
-    # ==================================================================
-
-    def _detect_asset_class(self, df_signals: pd.DataFrame) -> str:
-        for sig in df_signals["Signal"].dropna().unique():
-            ac = self.engine.route(str(sig))
-            if ac != "EQUITY":
-                return ac
-        return "EQUITY"
-
-    def _prefetch_data(self, df_signals: pd.DataFrame):
-        """Prefetch manage-resolution data before the simulation loop.
-
-        Mirrors trader.py's ``fetch_or_update_cache`` calls — all data is
-        fetched upfront before the simulation loop.
-        """
-        # Manage-resolution data (same as trader.py's manage_data_cache)
-        manage_interval = getattr(self.config, "MANAGE_INTERVAL", "1h")
-        self._df_manage = self.data_handler.get_historical_data(
-            ticker=self.ticker,
-            start=df_signals.index.min().isoformat(),
-            end=self.end_date,
-            interval=manage_interval,
-        )
-        if not self._df_manage.empty:
-            self._df_manage = self._df_manage.sort_index()
-        # Feed the bars replay buffer for the manage cadence exactly once, so
-        # the per-bar loop consumes a pre-loaded stream (no re-fetch/parse).
-        manage_sub = Subscription(
-            instrument=EquityInstrument(symbol=self.ticker, venue=self.venue),
-            datatype=Datatype.BARS,
-            cadence=manage_interval,
-        )
-        self._subscription_buffers[manage_sub.key()] = self._df_manage
+        self._running_equity = self._venue.execution_client.running_equity

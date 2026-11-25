@@ -60,6 +60,40 @@ class Portfolio:
         """Return the open position for a (venue, symbol), or ``None``."""
         return self._positions.get(_key_of(venue, symbol))
 
+    def open_positions(self, strategy_name: str | None = None) -> list[Position]:
+        """Open positions, optionally filtered to one strategy name.
+
+        The author body's manage pass reads its own open positions here (to
+        evaluate stops/max-hold/cross-down exits); ``None`` returns every open
+        position. Only states that still hold quantity are returned.
+        """
+        positions = [
+            pos
+            for pos in self._positions.values()
+            if pos.state is not PositionState.CLOSED
+        ]
+        if strategy_name is None:
+            return positions
+        return [p for p in positions if p.strategy == strategy_name]
+
+    def open_exposure(self) -> float:
+        """Total signed cost basis of open positions (absolute dollars at risk).
+
+        Reads the ledger's current open exposure the author can size against
+        (sum of |signed qty x avg price| across open positions).
+        """
+        return sum(abs(pos.cost_basis) for pos in self._positions.values())
+
+    def read_only(self) -> _ReadOnlyPortfolio:
+        """A read-only view of this portfolio (spec `portfolio` injection).
+
+        The engine hands the author body this view, never the live portfolio:
+        it exposes every read surface (equity, margin, exposure, open
+        positions, metrics) but no mutator — fills remain venue-owned, so the
+        strategy cannot mutate portfolio state through the injected object.
+        """
+        return _ReadOnlyPortfolio(self)
+
     # ── The only way state changes: apply a fill ──────────────────────────
     def apply_fill(self, fill: Fill) -> Position | None:
         """Route *fill* into the matching position (or open a new one).
@@ -203,3 +237,68 @@ class Portfolio:
         for rec in snap.get("closed", []):
             pf._closed.append(Position._from_snapshot(rec))
         return pf
+
+
+class _ReadOnlyPortfolio:
+    """Read-only view of a :class:`Portfolio` (spec `portfolio` injection).
+
+    Shares the underlying portfolio's state (it is the same account, not a
+    projection with different semantics) but exposes no mutator: ``apply_fill``
+    and the raw ``_positions``/``_closed`` internals are not reachable, so the
+    author body handed this view cannot change account state. Fills remain
+    venue-owned and flow through :meth:`Portfolio.apply_fill` on the real
+    object, not through this view.
+    """
+
+    def __init__(self, portfolio: Portfolio) -> None:
+        self._portfolio = portfolio
+
+    # ── read-only account surface ─────────────────────────────────────────
+    @property
+    def starting_equity(self) -> float:
+        return self._portfolio.starting_equity
+
+    @property
+    def cash(self) -> float:
+        return self._portfolio.cash
+
+    @property
+    def positions(self) -> Mapping[PositionKey, Position]:
+        return self._portfolio.positions
+
+    def position(self, venue: str, symbol: str) -> Position | None:
+        return self._portfolio.position(venue, symbol)
+
+    def open_positions(self, strategy_name: str | None = None) -> list[Position]:
+        return self._portfolio.open_positions(strategy_name)
+
+    def open_exposure(self) -> float:
+        return self._portfolio.open_exposure()
+
+    @property
+    def closed_positions(self) -> list[Position]:
+        return self._portfolio.closed_positions
+
+    def strategy_names(self) -> list[str]:
+        return self._portfolio.strategy_names()
+
+    def unrealized_pnl(self, prices: Pricing) -> float:
+        return self._portfolio.unrealized_pnl(prices)
+
+    def realized_pnl(self) -> float:
+        return self._portfolio.realized_pnl()
+
+    def market_value(self, prices: Pricing) -> float:
+        return self._portfolio.market_value(prices)
+
+    def equity(self, prices: Pricing) -> float:
+        return self._portfolio.equity(prices)
+
+    def total_pnl(self, prices: Pricing) -> float:
+        return self._portfolio.total_pnl(prices)
+
+    def metrics(self, prices: Pricing) -> dict[str, Any]:
+        return self._portfolio.metrics(prices)
+
+    def to_snapshot(self) -> dict[str, Any]:
+        return self._portfolio.to_snapshot()

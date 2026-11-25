@@ -10,6 +10,7 @@ Covers:
 
 from __future__ import annotations
 
+import datetime
 import logging
 from types import SimpleNamespace
 from typing import Any
@@ -17,9 +18,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from quant.instruments import EquityInstrument
 from quant.live.trader import UnifiedTrader
 from quant.portfolio import Fill, Portfolio, Side
-from quant.venue.live import LiveExecutionClient
+from quant.venue.live import FillReport, LiveExecutionClient
 
 _logger = logging.getLogger("test_portfolio_live")
 
@@ -29,39 +31,34 @@ _logger = logging.getLogger("test_portfolio_live")
 # ---------------------------------------------------------------------------
 
 
-def _make_engine() -> MagicMock:
-    eng = MagicMock()
-    eng.route.return_value = "EQUITY"
-    eng.direction.return_value = 1
-    eng.build_position.side_effect = lambda *a, **kw: dict(kw)
-    return eng
-
-
 def _make_strategy(name: str = "TestStrat_paper") -> MagicMock:
     s = MagicMock()
     s.name = name
     s.env = "paper"
     s.client_name = "paper"
-    s.config.CAPITAL_PER_TRADE = 0.1
+    s.config = type("Cfg", (), {"CAPITAL_PER_TRADE": 0.1})()
     return s
 
 
-def _make_client(equity: float = 50000.0, portfolio: Portfolio | None = None):
+def _make_instrument() -> EquityInstrument:
+    return EquityInstrument(symbol="SPY", venue="alpaca")
+
+
+def _make_client(portfolio: Portfolio | None = None):
     broker = MagicMock()
     broker.submit_order.return_value = MagicMock(id="ord-001")
-    equity_mgr = MagicMock()
-    equity_mgr.get.return_value = equity
-    equity_mgr.set_active.return_value = True
     strategy = _make_strategy()
     ex = LiveExecutionClient(
-        venue=SimpleNamespace(id="paper"),
+        venue=SimpleNamespace(id="alpaca", allows_entry_at=lambda now: True),
         clients={"paper": broker},
         strategies=[strategy],
-        active_positions={},
         portfolio=portfolio,
         logger=_logger,
-        equity_mgr=equity_mgr,
-        price_source=lambda order: 450.0,
+        # A deterministic full-fill report at the reference price, so the
+        # client never needs a real broker order surface in this unit test.
+        fill_resolver=lambda order_id, order, client: FillReport(
+            order_id, "FILLED", order.quantity, order.quantity, 0.0, 450.0
+        ),
     )
     return ex, broker
 
@@ -77,17 +74,13 @@ class TestLiveExecutorParity:
         ex, _ = _make_client(portfolio=pf)
         strategy = _make_strategy()
 
-        pos = ex.enter(
-            strategy,
-            "SPY",
-            {"Signal": "BUY", "Close": 450.0, "Confidence": 0.9},
-            _make_engine(),
-        )
+        order = _make_instrument().make_order(Side.BUY, 10, strategy=strategy.name)
+        fill = ex.submit(order, now=datetime.datetime(2024, 6, 1, 14, 30))
 
-        assert pos is not None
-        live_pos = pf.position("paper", "SPY")
+        assert fill is not None
+        live_pos = pf.position("alpaca", "SPY")
         assert live_pos is not None
-        assert live_pos.signed_qty > 0  # same sizing as the executed order
+        assert live_pos.signed_qty == 10  # same quantity as the executed order
         assert live_pos.avg_price == pytest.approx(450.0)
         assert live_pos.strategy == "TestStrat_paper"
 
@@ -95,27 +88,28 @@ class TestLiveExecutorParity:
         pf = Portfolio(starting_equity=10_000.0)
         ex, _ = _make_client(portfolio=pf)
         strategy = _make_strategy()
+        instrument = _make_instrument()
 
-        pos = ex.enter(
-            strategy,
-            "SPY",
-            {"Signal": "BUY", "Close": 450.0, "Confidence": 0.9},
-            _make_engine(),
+        ex.submit(
+            instrument.make_order(Side.BUY, 10, strategy=strategy.name),
+            now=datetime.datetime(2024, 6, 1, 14, 30),
         )
-        assert ex.exit("TestStrat_paper", pos, {}) is True
-        assert pf.position("paper", "SPY") is None  # closed
+        ex.submit(
+            instrument.make_order(Side.SELL, 10, strategy=strategy.name),
+            now=datetime.datetime(2024, 6, 1, 15, 30),
+        )
+        assert pf.position("alpaca", "SPY") is None  # closed
         assert len(pf.closed_positions) == 1
 
     def test_no_portfolio_is_a_noop(self) -> None:
-        # Without a portfolio collector, entry fills are simply not emitted.
+        # Without a portfolio collector, the client still returns the fill;
+        # there is simply no account to apply it to.
         ex, _ = _make_client(portfolio=None)
-        pos = ex.enter(
-            _make_strategy(),
-            "SPY",
-            {"Signal": "BUY", "Close": 450.0, "Confidence": 0.9},
-            _make_engine(),
+        order = _make_instrument().make_order(
+            Side.BUY, 10, strategy=_make_strategy().name
         )
-        assert pos is not None
+        fill = ex.submit(order, now=datetime.datetime(2024, 6, 1, 14, 30))
+        assert fill is not None
 
 
 # ---------------------------------------------------------------------------

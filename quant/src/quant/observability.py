@@ -37,17 +37,16 @@ class SpanName(StrEnum):
     """
 
     # ── durations (how long work took) ───────────────────────────────────
-    GENERATE_SIGNALS = "generate_signals"
-    STRATEGY_CALC_TOTAL = "strategy_calc_total"
-    FETCH_DATA = "fetch_data"
-    FETCH_MANAGE_DATA = "fetch_manage_data"
-    RUN_SIGNALS = "run_signals"
-    PROCESS_TICKER = "process_ticker"
+    # The reshaped declarative path (strategy-dataflow) measures the author
+    # body and its order submission; the legacy signal/manage-span set
+    # (RUN_SIGNALS / PROCESS_TICKER / EXECUTION_DISPATCH and the fetch spans)
+    # is gone with the methods it timed.
+    DECIDE = "decide"
+    DECISION_SUBMIT = "decision_submit"
     TICK_ELAPSED = "tick_elapsed"
     TICK_DISPATCH = "tick_dispatch"
     MAIN_LOOP_LAG = "main_loop_lag"
     QUEUE_LAG = "queue_lag"
-    EXECUTION_DISPATCH = "execution_dispatch"
     WARMUP_TOTAL = "warmup_total"
 
     # ── age (how stale the input is) — keep perpendicular to durations ───
@@ -67,14 +66,11 @@ class Span:
     no-op. Mutate the *event* dict inside the block to add dynamic fields (e.g.
     ``accepted``) — they are merged at exit::
 
-        with Span(SpanName.FETCH_DATA, emit=self._monitor_emit):
-            df = fetch_data(...)
+        with Span(SpanName.DECIDE, emit=self._monitor_emit):
+            decisions = strategy.decide(...)
 
-        with Span(SpanName.GENERATE_SIGNALS, collect=self._last_signal_spans):
-            df_sig = self.strategy.generate_signals(df_ind)
-
-        @span(SpanName.PROCESS_TICKER)     # decorator form
-        def process_ticker(...): ...
+        @span(SpanName.DECISION_SUBMIT)    # decorator form
+        def submit_decisions(...): ...
 
     ``emit is None`` → measured but never recorded (cost is one
     ``perf_counter_ns`` read each side).
@@ -121,7 +117,7 @@ class Span:
 
 
 def span(name: SpanName, *, emit: MonitorEmit | None = None) -> Span:
-    """Decorator shorthand: ``@span(SpanName.RUN_SIGNALS)``."""
+    """Decorator shorthand: ``@span(SpanName.DECIDE)``."""
     return Span(name, emit=emit)
 
 
@@ -130,7 +126,7 @@ def span(name: SpanName, *, emit: MonitorEmit | None = None) -> Span:
 # minus the event-local (non-SLO) spans, derived (no second list).
 SPAN_KEYS: frozenset[str] = frozenset(span_key(n) for n in SpanName)
 _NON_SLO_SPANS: frozenset[str] = frozenset(
-    {span_key(SpanName.EXECUTION_DISPATCH), span_key(SpanName.WARMUP_TOTAL)}
+    {span_key(SpanName.DECISION_SUBMIT), span_key(SpanName.WARMUP_TOTAL)}
 )
 SLO_SPAN_KEYS: frozenset[str] = SPAN_KEYS - _NON_SLO_SPANS
 

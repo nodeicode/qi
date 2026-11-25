@@ -1,10 +1,10 @@
-"""Offline fixtures for the ``example_equity`` golden regression (group 7.3).
+"""Offline fixtures for the ``example_equity`` golden regression (declarative).
 
 Stable synthetic equity bars live under ``quant/tests/data/fixtures/`` and are
 served through a data handler that never touches a network or API key, so the
-backtest path runs fully offline. The bars are a deterministic deterministic
-oscillation (no RNG) that produces a realistic run of MA-cross signals for
-``ExampleEquityStrategy`` (1h interval).
+backtest path runs fully offline. The bars are a deterministic oscillation (no
+RNG) that produces a realistic run of MA-cross decisions for the declarative
+``ExampleEquityStrategy`` (1h bar interval).
 """
 
 from __future__ import annotations
@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from quant.data import Datatype, Subscription
+from quant.instruments import EquityInstrument
 from quant.strategies.example_equity.strategy import ExampleEquityConfig
 
 TICKER = "SPY"
@@ -40,7 +42,21 @@ def load_example_equity_bars() -> pd.DataFrame:
 
 
 class ExampleEquityDataHandler:
-    """Serves the synthetic bars for any (ticker/start/end/interval) window."""
+    """Serves the synthetic bars for a subscription or a (ticker/interval) window."""
+
+    _SUB = Subscription(
+        instrument=EquityInstrument(symbol=TICKER, venue="backtest"),
+        datatype=Datatype.BARS,
+        cadence="1h",
+    )
+
+    def get_data(self, subscription, start, end, use_cache=True, adjustment=None):
+        del use_cache, adjustment
+        if subscription.key() != self._SUB.key():
+            return pd.DataFrame()
+        return self.get_historical_data(
+            ticker=TICKER, start=start, end=end, interval="1h"
+        )
 
     def get_historical_data(
         self,
@@ -58,8 +74,8 @@ class ExampleEquityDataHandler:
 
 
 def make_example_config(**overrides) -> ExampleEquityConfig:
-    """Frozen config for the example_equity golden run."""
-    cfg = ExampleEquityConfig(TICKERS=[TICKER])
+    """Frozen config for the example_equity golden run (declarative defaults)."""
+    cfg = ExampleEquityConfig()
     for key, value in overrides.items():
         setattr(cfg, key, value)
     return cfg

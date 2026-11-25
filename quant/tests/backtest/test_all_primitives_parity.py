@@ -41,7 +41,6 @@ import pandas as pd
 from quant.backtest.backtest_data_handler import BacktestDataHandler
 from quant.backtest.backtester import Backtester
 from quant.config import ConfigSync, FileConfigSource
-from quant.core.engine import TradingEngine
 from quant.core.protocols import DataHandlerProtocol
 from quant.instruments import EquityInstrument, equity_from_tickers, validate_instrument
 from quant.portfolio import Portfolio
@@ -81,6 +80,11 @@ def source_equity_config(tmp_path) -> ExampleEquityConfig:
     canonical = make_example_config()
     entry: dict = {"name": "example_equity"}
     for f in dataclasses.fields(canonical):
+        if f.name in {"instruments", "subscriptions", "venue"}:
+            # Declarations are typed objects that cannot round-trip through
+            # the JSON config payload; they come from the dataclass defaults
+            # on both sides.
+            continue
         entry[f.name] = getattr(canonical, f.name)
     config_file = tmp_path / "equity_config.json"
     config_file.write_text(
@@ -129,11 +133,12 @@ def build_venue() -> BacktestVenue:
 def drive_engine_path(cfg: ExampleEquityConfig, venue: BacktestVenue):
     """The engine decision path: drive ``process_strategy`` per bar directly.
 
-    Reuses ``Backtester``'s proven data preparation (``prepare_signals`` /
-    ``_prefetch_data``), then **explicitly** builds the backtest venue's
-    execution client and calls ``process_strategy`` on every bar — the shared
-    one-pipeline entrypoint (parity-load-bearing engine primitive) — feeding
-    fills into the attached ``Portfolio``. Never invokes ``run_backtest``.
+    Reuses ``Backtester``'s proven data preparation (``_prefetch_data``), then
+    **explicitly** seeds the per-run replay handler and wires the backtest
+    venue's execution client, and calls ``process_strategy`` on every
+    closed-bar timestamp — the shared one-pipeline entrypoint
+    (parity-load-bearing engine primitive) — feeding fills into the attached
+    ``Portfolio``. Never invokes ``run_backtest``.
     """
     pf = Portfolio(starting_equity=cfg.INITIAL_CAPITAL)
     bt = Backtester(
@@ -147,31 +152,27 @@ def drive_engine_path(cfg: ExampleEquityConfig, venue: BacktestVenue):
         portfolio=pf,
         venue=venue.id,
     )
-    df_signals = bt.prepare_signals()
-    assert not df_signals.empty
-    bt._prefetch_data(df_signals)
+    bt._prefetch_data()
 
-    signal_interval = getattr(cfg, "INTERVAL", "1h")
-    manage_interval = getattr(cfg, "MANAGE_INTERVAL", signal_interval)
-    dh = BacktestDataHandler(
-        df_signals=df_signals,
-        df_manage=bt._df_manage,
-        signal_interval=signal_interval,
-        manage_interval=manage_interval,
+    # Seed the per-run replay handler with the pre-fetched subscription
+    # buffers and wire it (plus the run's execution client) onto the venue —
+    # the same wiring ``Backtester._simulate`` performs.
+    data_handler = BacktestDataHandler(
+        df_signals=pd.DataFrame(),
+        df_manage=pd.DataFrame(),
+        signal_interval="",
+        manage_interval="",
     )
-    bt.engine.data_handler = cast("DataHandlerProtocol", dh)
-    bt.engine.cache_signals(TICKER, df_signals)
+    for sub, frame in bt._sub_frames:
+        data_handler.seed(sub, frame)
+    bt.engine.data_handler = cast("DataHandlerProtocol", data_handler)
+    venue.data_source = data_handler
+    venue.execution_client = bt._build_execution_client()
 
-    client = bt._build_execution_client(df_signals)
-    prev = list(cfg.TICKERS)
-    try:
-        cfg.TICKERS = [TICKER]
-        for ts, _row in df_signals.iterrows():
-            bt.engine.process_strategy(bt.strategy, cast("pd.Timestamp", ts), client)
-    finally:
-        cfg.TICKERS = prev
-    client.force_close_remaining()
-    return bt, client, pf, df_signals
+    for ts in bt._timeline():
+        bt.engine.process_strategy(bt.strategy, cast("pd.Timestamp", ts), venue)
+    venue.execution_client.force_close_remaining()
+    return bt, venue, pf
 
 
 def drive_backtest_path(cfg: ExampleEquityConfig, venue: BacktestVenue):
@@ -233,7 +234,8 @@ def test_all_four_primitives_compose(tmp_path) -> None:
     instrument = build_instrument()
     venue = build_venue()
 
-    assert cfg.TICKERS == [TICKER]
+    assert cfg.subscriptions[0].instrument.symbol == TICKER
+    assert cfg.subscriptions[0].cadence == "1h"
     assert instrument.symbol == TICKER
     assert instrument.venue == "backtest"
     assert venue.is_open_at(pd.Timestamp("2024-01-02 14:00"))
@@ -255,7 +257,7 @@ def test_engine_decision_path_matches_backtester(tmp_path) -> None:
     cfg = source_equity_config(tmp_path)
     venue = build_venue()
 
-    bt_engine, _, pf_engine, _ = drive_engine_path(cfg, venue)
+    bt_engine, _, pf_engine = drive_engine_path(cfg, venue)
     bt_backtest, pf_backtest = drive_backtest_path(cfg, venue)
 
     assert _decision_sequence(bt_engine) == _decision_sequence(bt_backtest), (
@@ -274,8 +276,8 @@ def test_engine_path_is_deterministic(tmp_path) -> None:
     """Re-running the engine decision path yields identical fills + metrics."""
     cfg = source_equity_config(tmp_path)
     venue = build_venue()
-    _, _, pf_a, _ = drive_engine_path(cfg, venue)
-    _, _, pf_b, _ = drive_engine_path(cfg, venue)
+    _, _, pf_a = drive_engine_path(cfg, venue)
+    _, _, pf_b = drive_engine_path(cfg, venue)
     assert portfolio_snapshot(pf_a) == portfolio_snapshot(pf_b)
     assert portfolio_metrics(pf_a) == portfolio_metrics(pf_b)
 
@@ -288,7 +290,7 @@ def test_engine_golden_regression(tmp_path) -> None:
     """
     cfg = source_equity_config(tmp_path)
     venue = build_venue()
-    bt_engine, _, pf_engine, _ = drive_engine_path(cfg, venue)
+    bt_engine, _, pf_engine = drive_engine_path(cfg, venue)
     capture = {
         "decision_sequence": _decision_sequence(bt_engine),
         "portfolio_metrics": portfolio_metrics(pf_engine),

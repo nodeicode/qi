@@ -37,7 +37,6 @@ from quant.order import Order, OrderPriceType
 from quant.portfolio import Fill, Side
 from quant.utils.fills import apply_slippage, calculate_fill_time, tradable_close_at
 from quant.utils.strategy_config import BaseStrategyConfig
-from quant.utils.time import calculate_entry_time
 from quant.venue.base import (
     BaseVenue,
     CalendarProtocol,
@@ -128,6 +127,8 @@ class BacktestExecutionClient:
         self._price_source: Callable[[Order], float | None] = price_source or (
             lambda _order: None
         )
+        # Fill-clock cadence default (overridden per submission by the engine).
+        self._cadence: str = "1h"
 
     # ── Ledger sync (Backtester reads these after the run) ────────────────
     @property
@@ -138,16 +139,86 @@ class BacktestExecutionClient:
     def collateral_in_use(self) -> float:
         return self._collateral_in_use
 
-    # ── Typed-order seam (spec `execution` Backtest fills) ────────────────
-    def submit(self, order: Order) -> Fill | None:
-        """Simulate a fill for *order* at the tradable price, or ``None``."""
-        market = self._price_source(order)
-        if market is None or float(market) <= 0:
+    @property
+    def _fill_config(self) -> Any:
+        """Strategy config the fill path reads fill knobs from.
+
+        The backtest fill path prices and clocks fills from strategy-owned
+        knobs (``DATA_DELAY``) plus the entry/exit tick cadence the engine
+        passes per submission; ``Any`` keeps the duck surface honest for
+        configs that opt into the legacy ``DATA_DELAY`` spelling.
+        """
+        return self.config
+
+    def _data_delay(self) -> int:
+        """Strategy-config ``DATA_DELAY`` (minutes), 0 when unset."""
+        cfg = self._fill_config
+        try:
+            return max(0, int(getattr(cfg, "DATA_DELAY", 0) or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    # ── entry/exit fill simulation (typed-order seam) ────────────────────
+    def submit(
+        self,
+        order: Order,
+        *,
+        now=None,
+        cadence: str | None = None,
+        reference_price=None,
+    ) -> Fill | None:
+        """Simulate a fill for *order*, or ``None`` when it cannot fill.
+
+        Two pricing paths share one seam. With a tick timestamp (*now*), the
+        fill is priced on the tradable (raw) close of the first closed bar at/
+        after the fill clock ``T+I+DATA_DELAY`` (``calculate_fill_time``) — the
+        author body ran on adjusted bars while execution is in tradable space
+        with per-side slippage. Without a clock (direct seam calls), the fill
+        prices at the injected ``price_source`` with the same limit-crossing
+        rule. An order with no resolvable positive price (or an unfilled
+        limit) reports ``None``; an opening order spins up a Position in the
+        portfolio, an opposing order closes/reduces it and settles a trade-log
+        entry when the position closes. ``reference_price`` is accepted for
+        shared-loop parity with the live client and unused here.
+        """
+        del reference_price
+        now_ts = pd.Timestamp(now) if now is not None else None
+        if now_ts is not None:
+            cadence = cadence or self._cadence or "1h"
+            fill_time = calculate_fill_time(now_ts, cadence, self._data_delay())
+            df_entry = self._slice_manage(start=fill_time)
+            if df_entry.empty:
+                return None
+            raw_market = tradable_close_at(df_entry.iloc[0])
+            if raw_market is None or raw_market <= 0:
+                return None
+            direction = 1 if order.side is Side.BUY else -1
+            market = apply_slippage(
+                self._fill_config, raw_market, direction, is_entry=True
+            )
+            fill_price = self._resolve_fill_price(order, market)
+            if fill_price is None or fill_price <= 0:
+                return None
+            fill = Fill(
+                venue=order.venue,
+                symbol=order.instrument.symbol,
+                side=order.side,
+                qty=float(order.quantity),
+                price=float(fill_price),
+                strategy=order.strategy,
+                instrument=order.instrument,
+                timestamp=fill_time,
+            )
+            return self._apply_fill(order, fill)
+
+        # Direct seam calls without a tick clock: price from the injected
+        # source (tests / ad-hoc venues) with the same limit-crossing rule.
+        raw_market = self._price_source(order)
+        if raw_market is None or float(raw_market) <= 0:
             return None
-        fill_price = self._resolve_fill_price(order, float(market))
+        fill_price = self._resolve_fill_price(order, float(raw_market))
         if fill_price is None or fill_price <= 0:
             return None
-
         fill = Fill(
             venue=order.venue,
             symbol=order.instrument.symbol,
@@ -171,286 +242,131 @@ class BacktestExecutionClient:
             return market
         return None
 
-    @property
-    def _fill_config(self) -> Any:
-        """Strategy config the shared-loop duck surface reads fill knobs from.
+    def _apply_fill(self, order: Order, fill: Fill) -> Fill | None:
+        """Apply *fill* to the portfolio and settle run-ledger bookkeeping.
 
-        The legacy per-bar loop prices and clocks fills from strategy-owned
-        knobs (``INTERVAL`` / ``MANAGE_INTERVAL`` / ``DATA_DELAY`` /
-        ``CAPITAL_PER_TRADE``) that legacy strategy configs declare beyond
-        ``BaseStrategyConfig``; ``Any`` keeps this duck surface honest until
-        the reshaped engine deletes it.
+        An opening fill (no open position for the key) spins up the Position.
+        An opposing fill reduces/closes it; a full close also settles the trade
+        log + running equity, and the venue's forced-close uses the same path.
         """
-        return self.config
-
-    # ── Shared-loop duck surface (absorbed from ExecutorRouter/EquityExecutor)
-    def should_run(self, strategy, now) -> tuple[bool, bool]:
-        """Every bar runs both phases — the bar loop drives the schedule."""
-        return (True, True)
-
-    def record_run(self, strategy_name: str, now, ran_signal: bool) -> None:
-        return None
-
-    def data_end_dt(self, now):
-        """Manage-window cutoff = signal bar close (T+I), not fill clock.
-
-        Fill clock is ``T+I+DATA_DELAY`` via enter / manage-triggered exits.
-        Extending the manage cutoff to the delayed fill wall would let the
-        manage pass see bars live cannot see when the signal first becomes
-        known — silent parity drift.
-        """
-        return pd.Timestamp(calculate_entry_time(now, self._fill_config.INTERVAL))
-
-    def get_precomputed_signal(self, ticker: str, now) -> pd.DataFrame | None:
-        """Return the precomputed signal frame; engine selects by ``bar_ts``."""
-        if self.df_signals is None or self.df_signals.empty:
+        if self.portfolio is None:
             return None
-        return self.df_signals
+        key = (order.venue, order.instrument.symbol)
+        existing = self.portfolio.position(*key)
+        if existing is not None:
+            # Capture pre-close facts before the fill mutates the position.
+            pre = (
+                existing.entry_time,
+                existing.entry_price,
+                existing.qty,
+                existing.direction,
+                existing.signal,
+            )
+        self.portfolio.apply_fill(fill)
+        after = self.portfolio.position(*key)
+        if existing is not None and after is None:
+            self._settle_trade(
+                order, fill, pre, forced=bool(order.tag == "Force_Close")
+            )
+        return fill
 
-    def active_positions(self, strategy_name: str) -> list:
-        """The run ledger's open positions (shared-list reference)."""
-        return self._active_positions
-
-    def after_process_ticker(
-        self, strategy_name: str, ticker: str, results: list[dict]
+    def _settle_trade(
+        self,
+        order: Order,
+        fill: Fill,
+        pre,
+        *,
+        forced: bool,
     ) -> None:
-        return None
-
-    def after_entry(self, strategy_name: str, position: dict) -> None:
-        return None
-
-    def after_exit(self, strategy_name: str, position: dict) -> None:
-        return None
-
-    # ── Fill simulation (equity semantics from the deleted EquityExecutor) ─
-    def enter(
-        self,
-        strategy,
-        ticker: str,
-        signal_row: dict,
-        engine,
-        *,
-        now=None,
-    ) -> dict | None:
-        """Open a position for an actionable entry. Returns the position dict."""
-        signal_time = now
-        entry_time = calculate_fill_time(
-            signal_time, self._fill_config.INTERVAL, self._fill_config.DATA_DELAY
-        )
-        try:
-            row = self.df_signals.loc[now]
-        except KeyError:
-            row = pd.Series(signal_row)
-
-        signal = str(signal_row.get("Signal", "BUY"))
-        confidence = float(signal_row.get("Confidence", 0.0))
-        direction = engine.direction(signal)
-
-        df_entry = self._slice_manage(start=entry_time)
-        if df_entry.empty:
-            return None
-
-        raw_entry = tradable_close_at(df_entry.iloc[0])
-        entry_price = apply_slippage(
-            self._fill_config, raw_entry, direction, is_entry=True
-        )
-
-        # Fill quantity for the simulated entry: a fixed fraction of the run's
-        # starting equity per trade, floored to whole shares. This is the
-        # legacy fill-simulation sizing leg (author-side sizing on instrument
-        # contract facts + the portfolio replaces it on the declarative path).
-        pos_size = float(row.get("Position_Size", 1.0))
-        capital_frac = float(self._fill_config.CAPITAL_PER_TRADE)
-        effective_capital = self.starting_equity * capital_frac * pos_size
-        shares = int(effective_capital / entry_price) if entry_price > 0 else 0
-        sizing = {
-            "effective_capital": effective_capital,
-            "shares": shares,
-            "capital_fraction": capital_frac,
-        }
-
-        position = dict(
-            engine.build_position(
-                entry_time=entry_time,
-                entry_price=entry_price,
-                direction=direction,
-                signal=signal,
-                confidence=confidence,
-                PositionSize=pos_size,
-            )
-        )
-        position["Ticker"] = ticker
-        position["_asset_class"] = "EQUITY"
-        position["_sizing"] = sizing
-        position["_row"] = row
-        position["_strategy_name"] = getattr(strategy, "name", None)
-        self._active_positions.append(position)
-
-        # Portfolio-collecting mode: stream the simulated entry fill through the
-        # same Position machinery the live path uses (parity by construction).
-        if self.portfolio is not None:
-            direction = int(position.get("Direction", 1))
-            shares = int(sizing.get("shares", 0) or 0)
-            if shares > 0:
-                self.portfolio.apply_fill(
-                    Fill(
-                        venue=self.venue,
-                        symbol=ticker,
-                        side=Side.BUY if direction >= 0 else Side.SELL,
-                        qty=shares,
-                        price=float(entry_price),
-                        strategy=getattr(strategy, "name", None),
-                        timestamp=entry_time,
-                    )
-                )
-
-        return self._active_positions[-1]
-
-    def exit(
-        self,
-        strategy_name: str,
-        position: dict,
-        sig: dict,
-        *,
-        forced: bool = False,
-        manage_df: pd.DataFrame | None = None,
-    ) -> bool:
-        """Close *position*. Returns True on success (position removed)."""
-        pos = sig.get("_position", position)
-
-        if manage_df is None:
-            manage_df = self.df_manage
-
-        entry_time = pos.get("EntryTime")
-        if entry_time is not None:
-            _et = pd.Timestamp(entry_time)
-            if pd.notna(_et):
-                _trimmed = manage_df[manage_df.index >= _et]
-                if not _trimmed.empty:
-                    manage_df = _trimmed
-
-        if manage_df.empty:
-            self._log.warning(
-                "BacktestExecutionClient.exit: manage_df empty after EntryTime trim "
-                "for %s — skipping",
-                pos.get("Ticker"),
-            )
-            if pos in self._active_positions:
-                self._active_positions.remove(pos)
-            return True
-
-        exit_idx = sig.get("exit_idx", len(manage_df) - 1)
-        if exit_idx >= len(manage_df):
-            exit_idx = len(manage_df) - 1
-        exit_row = manage_df.iloc[exit_idx]
-        exit_bar = pd.Timestamp(exit_row.name)
-
-        exit_time = calculate_fill_time(
-            exit_bar,
-            self._fill_config.MANAGE_INTERVAL or self._fill_config.INTERVAL,
-            self._fill_config.DATA_DELAY,
-        )
-
-        direction = pos.get("Direction", 1)
-        entry_price = pos["EntryPrice"]
-        entry_time = pos["EntryTime"]
-
-        exit_price = apply_slippage(
-            self._fill_config,
-            tradable_close_at(exit_row),
-            direction,
-            is_entry=False,
-        )
-
-        sizing = pos.get("_sizing", {})
-        eff_cap = sizing.get(
-            "effective_capital",
-            self.starting_equity * float(self._fill_config.CAPITAL_PER_TRADE),
-        )
-        pnl = (
-            (
-                (exit_price - entry_price)
-                if direction == 1
-                else (entry_price - exit_price)
-            )
-            * eff_cap
-            / entry_price
-            if entry_price
-            else 0.0
-        )
-
+        """Append one realized trade-log entry + update running equity."""
+        entry_time, entry_price, qty, direction, signal = pre
+        qty = float(qty or 0.0)
+        if qty <= 0:
+            return
+        pnl = (float(fill.price) - float(entry_price)) * qty * direction
+        exit_time = pd.Timestamp(fill.timestamp)
+        reason = str(order.tag or ("Force_Close" if forced else "Signal"))
         self._running_equity += pnl
+        trade = {
+            "EntryTime": entry_time,
+            "ExitTime": exit_time,
+            "Signal": signal,
+            "Direction": direction,
+            "EntryPrice": float(entry_price),
+            "ExitPrice": float(fill.price),
+            "Contracts": qty,
+            "PnL": pnl,
+            "DurationMinutes": (exit_time - pd.Timestamp(entry_time)).total_seconds()
+            / 60.0,
+            "Reason": reason,
+            "Confidence": 0.0,
+        }
+        self.trade_log.append(trade)
+        self._update_reason_stats(trade)
 
-        # Portfolio-collecting mode: stream the simulated exit fill through the
-        # same Position machinery the live path uses (parity by construction).
-        if self.portfolio is not None:
-            shares = int((sizing or {}).get("shares", 0) or 0)
-            if shares > 0:
-                self.portfolio.apply_fill(
-                    Fill(
-                        venue=self.venue,
-                        symbol=str(pos.get("Ticker", self.ticker)),
-                        side=Side.SELL if direction >= 0 else Side.BUY,
-                        qty=shares,
-                        price=float(exit_price),
-                        strategy=strategy_name or pos.get("_strategy_name"),
-                        timestamp=exit_time,
-                    )
-                )
-
-        signal_row = pos.get("_row")
-        reason_default = "Force_Close" if forced else "Signal"
-        reason = (
-            signal_row.get("Reason", reason_default)
-            if signal_row is not None
-            else reason_default
+    def _force_close(self, position) -> None:
+        """Close one open position at the last available tradable bar."""
+        if self.df_manage.empty or self.portfolio is None:
+            return
+        instrument = getattr(position, "instrument", None)
+        if instrument is None:
+            instrument = self._instrument_for_symbol(getattr(position, "symbol", ""))
+        if instrument is None:
+            return
+        direction = int(getattr(position, "direction", 1) or 1)
+        side = Side.SELL if direction > 0 else Side.BUY
+        order = instrument.make_order(
+            side,
+            float(getattr(position, "qty", 0.0) or 0.0),
+            tag="Force_Close",
+            strategy=getattr(position, "strategy", None),
         )
-
-        self.trade_log.append(
-            {
-                "EntryTime": entry_time,
-                "ExitTime": exit_time,
-                "Signal": pos.get("Signal", ""),
-                "Direction": direction,
-                "EntryPrice": entry_price,
-                "ExitPrice": exit_price,
-                "Contracts": sizing.get("shares", 0),
-                "PnL": pnl,
-                "DurationMinutes": (exit_time - entry_time).total_seconds() / 60.0,
-                "Reason": reason,
-                "Confidence": pos.get("Confidence", 0),
-            }
+        if order.quantity <= 0:
+            return
+        exit_row = self.df_manage.iloc[-1]
+        exit_time = pd.Timestamp(exit_row.name)
+        raw_market = tradable_close_at(exit_row)
+        side_dir = 1 if side is Side.BUY else -1
+        market = apply_slippage(self._fill_config, raw_market, side_dir, is_entry=False)
+        fill_price = self._resolve_fill_price(order, market)
+        if fill_price is None or fill_price <= 0:
+            return
+        fill = Fill(
+            venue=position.venue,
+            symbol=position.symbol,
+            side=side,
+            qty=order.quantity,
+            price=float(fill_price),
+            strategy=order.strategy,
+            instrument=instrument,
+            timestamp=exit_time,
         )
-        self._update_reason_stats(self.trade_log[-1])
+        self._apply_fill(order, fill)
 
-        if pos in self._active_positions:
-            self._active_positions.remove(pos)
-        return True
+    def _instrument_for_symbol(self, symbol: str):
+        """Best-effort typed instrument for a symbol (venue-scoped)."""
+        if not symbol:
+            return None
+        try:
+            from quant.instruments import EquityInstrument
+
+            return EquityInstrument(symbol=symbol, venue=self.venue)
+        except Exception:
+            return None
 
     # ── End-of-run ─────────────────────────────────────────────────────────
     def force_close_remaining(self) -> None:
         """Close any positions still active at the end of the backtest."""
-        if not self._active_positions:
+        if self.portfolio is None:
             return
-        self._log.info(
-            "Force-closing %d remaining position(s).",
-            len(self._active_positions),
-        )
-        for pos in list(self._active_positions):
-            self.force_close(pos)
-        self._active_positions.clear()
-
-    def force_close(self, position: dict) -> None:
-        """Force-close equity position at last available manage bar."""
-        if self.df_manage.empty:
-            if position in self._active_positions:
-                self._active_positions.remove(position)
+        open_positions = [
+            p for p in self.portfolio.open_positions() if p.venue == self.venue
+        ]
+        if not open_positions:
             return
-        sig = {
-            "_position": position,
-            "exit_idx": len(self.df_manage) - 1,
-        }
-        self.exit("", position, sig, forced=True, manage_df=self.df_manage)
+        self._log.info("Force-closing %d remaining position(s).", len(open_positions))
+        for pos in list(open_positions):
+            self._force_close(pos)
 
     # ── Shared helpers ─────────────────────────────────────────────────────
     def _slice_manage(self, start=None, end=None) -> pd.DataFrame:

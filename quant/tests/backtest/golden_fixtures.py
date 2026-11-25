@@ -1,21 +1,30 @@
 """Deterministic synthetic fixtures for the golden backtest regression.
 
-The point of the golden harness (``test_golden_regression.py``) is to freeze
-end-to-end ``Backtester.run_backtest`` output *before* a refactor layer and
-prove the refactor did not change behavior.  This module builds that frozen
-world from scratch — no network, no real strategy — so the same fixture can
-run on the equity path today and (with a different strategy) on the futures
+The golden harness (``test_golden_regression.py``) freezes end-to-end
+``Backtester.run_backtest`` output over this fixture and proves the declarative
+path (resume strategy-dataflow: engine → author body → backtest venue) is
+deterministic and reproducible. No network, no real strategy — the fixture is
+built from scratch so the same bars drive the equity path today and the futures
 path later.
+
+The strategy here is declarative (``decide(events, portfolio)``): it BUYs on
+every N-th served bar and exits via the max-hold risk rule after
+``manage_after_days`` calendar days.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from typing import ClassVar
 
 import numpy as np
 import pandas as pd
 
-from quant.core.protocols import PositionDict
+from quant.data import Datatype, Subscription
+from quant.instruments import EquityInstrument
+from quant.portfolio import Side
+from quant.strategies.base import ExitIntent, Strategy
+from quant.strategies.risk import exit_risk_hit
+from quant.strategies.sizing import size_equity_lot
 from quant.utils.strategy_config import BaseStrategyConfig
 
 TICKER = "TEST"
@@ -28,8 +37,8 @@ class FakeDataHandler:
     """Serves deterministic daily OHLCV bars for any (ticker/start/end/interval).
 
     ``adjustment`` is accepted for ``DataHandlerProtocol`` parity and ignored
-    (synthetic series needs no adjustment).  Bars are tz-naive UTC-wall
-    midnight, matching the ``prepare_signals`` contract.
+    (the synthetic series needs no adjustment). Bars are tz-naive UTC-wall
+    midnight, matching the engine's bar-clock contract.
     """
 
     def __init__(self, days: int = 60):
@@ -47,6 +56,12 @@ class FakeDataHandler:
         )
         self._df = df
 
+    def get_data(self, subscription, start, end, use_cache=True, adjustment=None):
+        del subscription, use_cache, adjustment
+        s = pd.Timestamp(start)
+        e = pd.Timestamp(end)
+        return self._df.loc[(self._df.index >= s) & (self._df.index <= e)].copy()
+
     def get_historical_data(
         self,
         ticker: str,
@@ -56,67 +71,69 @@ class FakeDataHandler:
         use_cache: bool = True,
         adjustment: str | None = None,
     ) -> pd.DataFrame:
-        s = pd.Timestamp(start)
-        e = pd.Timestamp(end)
-        return self._df.loc[(self._df.index >= s) & (self._df.index <= e)].copy()
+        del ticker, interval
+        return self.get_data(
+            None, start, end, use_cache=use_cache, adjustment=adjustment
+        )
 
 
-class GoldenEquityStrategy:
-    """Minimal EQUITY strategy: BUY every N-th bar, NEUTRAL otherwise.
+class GoldenEquityStrategy(Strategy):
+    """Deterministic declarative equity strategy: BUY every N-th bar, max-hold exit."""
 
-    ``manage_trade`` force-exits after ``manage_after_days`` calendar days
-    (deterministic), so exits exercise the manage path instead of only the
-    end-of-run force close.
-    """
-
-    name = "golden_equity"
-    client_name = "golden"
+    name: ClassVar[str] = "golden_equity"
+    venue: ClassVar[str] = "backtest"
+    instruments: ClassVar[list] = [EquityInstrument(symbol=TICKER, venue="backtest")]
+    subscriptions: ClassVar[list] = [
+        Subscription(instrument=instruments[0], datatype=Datatype.BARS, cadence="1d")
+    ]
 
     def __init__(
-        self, config: BaseStrategyConfig, *, n: int = 7, manage_after_days: int = 5
+        self,
+        config: BaseStrategyConfig | None = None,
+        *,
+        n: int = 7,
+        manage_after_days: int = 5,
     ):
-        self.config = config
-        self._n = n
-        self._manage_after_days = manage_after_days
+        self.config = config or make_config()
+        # Max-hold exit = ``manage_after_days`` calendar days (deterministic).
+        self.config.MAX_HOLDING_MINUTES = max(1, int(manage_after_days) * 24 * 60)
+        self._n = max(1, int(n))
+        super().__init__()
 
-    def calculate_indicators(self, df: pd.DataFrame, **kw) -> pd.DataFrame:
-        out = df.copy()
-        out["sma"] = out["Close"].rolling(3, min_periods=1).mean()
+    def decide(self, events, portfolio) -> list:
+        bars = events.bars(TICKER)
+        if bars is None or bars.empty:
+            return []
+        now = bars.index[-1]
+        close = float(bars["Close"].iloc[-1])
+        out: list = []
+
+        # Manage pass — the folded exit evaluation (legacy manage_trade role).
+        for pos in portfolio.open_positions(self.name):
+            if exit_risk_hit(pos, self.config, spot=close, at=now):
+                out.append(ExitIntent(self.name, pos, reason="max hold"))
+
+        # Signal pass — BUY every N-th served bar, sized on the instrument lot.
+        if (
+            len(bars) % self._n == 0
+            and len(portfolio.open_positions(self.name))
+            < self.config.MAX_CONCURRENT_POSITIONS
+        ):
+            qty = size_equity_lot(
+                portfolio,
+                close,
+                instrument=self.instruments[0],
+                buying_power_fraction=0.1,
+            )
+            if qty > 0:
+                out.append(
+                    self.instruments[0].make_order(Side.BUY, qty, strategy=self.name)
+                )
         return out
-
-    def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame:
-        out = df.copy()
-        sig = np.where(np.arange(len(out)) % self._n == 0, "BUY", "NEUTRAL")
-        out["Signal"] = sig
-        out["Confidence"] = 0.9
-        out["Reason"] = "golden_test"
-        return out
-
-    def manage_trade(self, position: PositionDict, df: pd.DataFrame) -> int:
-        """Exit at the first bar >= EntryTime + manage_after_days (or hold)."""
-        entry_raw = position.get("EntryTime")
-        if entry_raw is None:
-            entry_raw = pd.NaT
-        # Engine guarantees EntryTime on positions; defensive fallback only.
-        entry = pd.Timestamp(entry_raw)  # ty: ignore[invalid-argument-type]
-        if entry.tzinfo is not None:
-            entry = entry.tz_convert("UTC").tz_localize(None)
-        cutoff = entry + pd.Timedelta(days=self._manage_after_days)
-        hit = df.index[df.index >= cutoff]
-        if len(hit) == 0:
-            return -1
-        return df.index.get_indexer([hit[0]])[0]
 
 
 def make_config(**overrides) -> BaseStrategyConfig:
-    """Frozen config for the golden equity run.
-
-    The engine-driven knobs (``INTERVAL`` / ``MANAGE_INTERVAL`` /
-    ``CAPITAL_PER_TRADE`` / ``TICKERS``) are no longer config fields — they are
-    set here as plain attributes because the legacy 3-method golden strategy
-    still runs through the legacy equity executor that reads them. This
-    fixture is re-pinned to the declarative transcript in a later step (5.4).
-    """
+    """Frozen config for the golden equity run (declarative default fields)."""
     cfg = BaseStrategyConfig(
         PRE_LOAD_DAYS=PRELOAD,
         INITIAL_CAPITAL=10_000.0,
@@ -124,16 +141,11 @@ def make_config(**overrides) -> BaseStrategyConfig:
         STOP_LOSS_PERCENT=0.30,
         TAKE_PROFIT_PERCENT=-1.0,  # disabled sentinel
         USE_TRAIL_LOSS=False,
-        MAX_HOLDING_MINUTES=43_200,  # 30 days - never force-exits mid-run
+        MAX_HOLDING_MINUTES=43_200,  # 30 days default (overridden per strategy)
         MIN_SIGNAL_CONFIDENCE=0.5,
         BASE_SLIPPAGE_FACTOR=0.0,
         DATA_DELAY=0,
     )
-    # Legacy engine-driven knobs the legacy golden executor still reads.
-    cfg.INTERVAL = "1d"
-    cfg.MANAGE_INTERVAL = "1d"
-    cfg.CAPITAL_PER_TRADE = 0.1
-    cfg.TICKERS = [TICKER]
     for key, value in overrides.items():
         setattr(cfg, key, value)
     return cfg

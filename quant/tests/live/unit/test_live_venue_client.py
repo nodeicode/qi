@@ -11,8 +11,12 @@ Covers the tasks that migrated off the deleted ``LiveExecutor`` /
   reads reflects the actual filled quantity,
 * **failures surface as errors** — a broker/reconciliation failure raises
   instead of being a silent no-op,
-* full-fill + limit-order placement through the typed seam, and
-* the bar-driven **scheduling duck surface** the shared loop drives.
+* full-fill + limit-order placement through the typed seam.
+
+(The legacy bar-driven scheduling duck surface the shared engine loop used to
+call — ``should_run`` / ``data_end_dt`` / ``record_run`` / ``after_entry`` /
+``get_precomputed_signal`` / ``enter`` — was deleted with the engine phasing;
+scheduling now lives in the engine's per-subscription cadence + venue session.)
 """
 
 from __future__ import annotations
@@ -48,29 +52,19 @@ def _client(
     is_open: bool = True,
     fill_resolver=None,
     price_source=100.0,
-    equity: float | None = None,
 ):
     """Build a LiveExecutionClient with a real broker mock (full-fill default)."""
     broker = MagicMock()
     broker.submit_order.return_value = MagicMock(id="o1")
-    kwargs = {}
-    if equity is not None:
-        em = MagicMock()
-        em.get.return_value = equity
-        em.set_active.return_value = True
-        kwargs["equity_mgr"] = em
     client = LiveExecutionClient(
         venue=_venue(is_open=is_open),
         clients={"paper": broker},
         strategies=[],
-        active_positions={},
         portfolio=portfolio,
         logger=MagicMock(),
         lock=threading.RLock(),
-        save_state=MagicMock(),
         fill_resolver=fill_resolver,
         price_source=(lambda order: price_source) if price_source is not None else None,
-        **kwargs,
     )
     return client, broker
 
@@ -140,35 +134,6 @@ class TestPartialFillTracking:
         assert report.status == "PARTIALLY_FILLED"
         assert report.remaining_qty == 6.0
 
-    def test_duck_entry_records_partial_fill_in_position_schema(self) -> None:
-        pf = Portfolio(starting_equity=100_000.0)
-        client, _ = _client(
-            portfolio=pf,
-            equity=50_000.0,
-            fill_resolver=lambda oid, order, client: FillReport(
-                oid, "PARTIALLY_FILLED", order.quantity, order.quantity - 6, 6.0, 100.0
-            ),
-        )
-        strat = MagicMock()
-        strat.name = "S"
-        strat.client_name = "paper"
-        strat.env = "paper"
-        strat.config.CAPITAL_PER_TRADE = 0.1
-        engine = MagicMock()
-        engine.direction.return_value = 1
-        engine.build_position.side_effect = lambda *a, **kw: dict(kw)
-
-        pos = client.enter(
-            strat, "SPY", {"Signal": "BUY", "Close": 100.0, "Confidence": 0.9}, engine
-        )
-
-        assert pos is not None
-        assert pos["OrderId"] == "o1"
-        assert pos["OrderStatus"] == "PARTIALLY_FILLED"
-        assert pos["FilledQty"] == pos["Qty"]
-        assert pos["RemainingQty"] == 6.0
-        assert pf.position("alpaca", "SPY").qty == pos["Qty"]
-
 
 # ===========================================================================
 # Failures surface as errors (spec — no silent no-ops)
@@ -198,88 +163,3 @@ class TestFailuresSurface:
         local_client._clients = {}
         with pytest.raises(RuntimeError, match="no broker client"):
             local_client.submit(_SPY.make_order("BUY", 10, strategy="s"), now=_NOW)
-
-
-# ===========================================================================
-# Bar-driven scheduling duck surface (shared engine loop)
-# ===========================================================================
-
-
-class TestSchedulingSurface:
-    def _strat(
-        self,
-        name: str = "S",
-        interval: str = "15m",
-        manage_interval: str | None = None,
-        data_delay: int = 0,
-    ):
-        s = MagicMock()
-        s.name = name
-        s.client_name = "paper"
-        s.config.INTERVAL = interval
-        s.config.MANAGE_INTERVAL = manage_interval or interval
-        s.config.DATA_DELAY = data_delay
-        return s
-
-    def test_first_tick_fires_both(self) -> None:
-        client, _ = _client()
-        now = datetime.datetime(2024, 6, 1, 14, 20, tzinfo=datetime.UTC)
-        assert client.should_run(self._strat(), now) == (True, True)
-
-    def test_same_closed_bar_suppressed(self) -> None:
-        client, _ = _client()
-        strat = self._strat()
-        now = datetime.datetime(2024, 6, 1, 14, 20, tzinfo=datetime.UTC)
-        client.last_update[strat.name] = datetime.datetime(
-            2024, 6, 1, 14, 16, tzinfo=datetime.UTC
-        )
-        assert client.should_run(strat, now) == (False, False)
-
-    def test_new_closed_bar_fires(self) -> None:
-        client, _ = _client()
-        strat = self._strat()
-        now = datetime.datetime(2024, 6, 1, 14, 30, tzinfo=datetime.UTC)
-        client.last_update[strat.name] = datetime.datetime(
-            2024, 6, 1, 14, 16, tzinfo=datetime.UTC
-        )
-        assert client.should_run(strat, now) == (True, True)
-
-    def test_manage_fires_independently_on_finer_bar(self) -> None:
-        client, _ = _client()
-        strat = self._strat("S", interval="1h", manage_interval="5m", data_delay=0)
-        now = datetime.datetime(2024, 6, 1, 14, 25, tzinfo=datetime.UTC)
-        client.last_update[strat.name] = datetime.datetime(
-            2024, 6, 1, 14, 5, tzinfo=datetime.UTC
-        )
-        client.last_manage_update[strat.name] = datetime.datetime(
-            2024, 6, 1, 14, 16, tzinfo=datetime.UTC
-        )
-
-        should_signal, should_manage = client.should_run(strat, now)
-
-        assert should_signal is False
-        assert should_manage is True
-
-    def test_data_end_dt_uses_per_strategy_delay(self) -> None:
-        client, _ = _client()
-        strat = self._strat(data_delay=0)
-        now = datetime.datetime(2024, 6, 1, 14, 20)  # canonical naive UTC
-        client.should_run(strat, now)  # records this thread's delay
-        assert client.data_end_dt(now) == now
-
-    def test_record_run_stamps_signal_and_manage(self) -> None:
-        client, _ = _client()
-        now = datetime.datetime(2024, 6, 1, 12, 0)  # canonical naive UTC
-        client.record_run("S", now, ran_signal=True)
-        assert client.last_update["S"] == now
-        assert client.last_manage_update["S"] == now
-
-    def test_after_entry_appends_and_persists(self) -> None:
-        client, _ = _client()
-        position = {"Ticker": "SPY", "OrderId": "new-1"}
-        client.after_entry("S", position)
-        assert position in client._active_positions["S"]
-
-    def test_get_precomputed_signal_is_none_live(self) -> None:
-        client, _ = _client()
-        assert client.get_precomputed_signal("SPY", None) is None
