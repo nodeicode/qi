@@ -22,7 +22,6 @@ Pipeline (via ``process_strategy``)
 from __future__ import annotations
 
 import datetime
-import inspect
 import logging
 import time
 from collections import OrderedDict
@@ -91,14 +90,11 @@ class TradingEngine:
         *,
         monitor_emit: Callable[[dict[str, Any]], None] | None = None,
     ):
-        # --- P1: Validate strategy interface ---
-        for method in ("calculate_indicators", "generate_signals", "manage_trade"):
-            if not callable(getattr(strategy, method, None)):
-                raise TypeError(
-                    f"Strategy {type(strategy).__name__!r} missing required "
-                    f"method '{method}'. See StrategyProtocol."
-                )
-
+        # The 3-method contracted strategy validation (calculate_indicators /
+        # generate_signals / manage_trade) is dissolved: the declarative surface
+        # speaks one author body, ``decide(events, portfolio)``. Construction no
+        # longer enforces the legacy methods (the engine drives the declarative
+        # body through the reshaped pipeline).
         config = getattr(strategy, "config", None)
         if not isinstance(config, BaseStrategyConfig):
             raise TypeError(
@@ -106,7 +102,11 @@ class TradingEngine:
                 "BaseStrategyConfig instance"
             )
 
-        self.strategy = strategy
+        # ``Any`` while the engine is mid-transition to the declarative surface:
+        # construction no longer enforces the legacy methods, and the author
+        # body (``decide``) is driven through the reshaped pipeline. The legacy
+        # signal/manage calls below remain until that pipeline lands.
+        self.strategy: Any = strategy
         # Data handler implementing ``DataHandlerProtocol``.
         # Live: ``AlpacaDataHandler`` (persistent disk cache via StockDataCache).
         # Backtest: ``BacktestDataHandler`` wrapping pre-loaded DataFrames.
@@ -130,11 +130,6 @@ class TradingEngine:
         # changes that would leave inject_indicators silently NaN-filling (D6).
         self._signal_cache_cols: dict[str, frozenset[str]] = {}
 
-        # Cache calculate_indicators signature once (hot path every live tick) so
-        # strategies with cross-asset logic can receive the ``ticker`` kwarg.
-        _params = inspect.signature(strategy.calculate_indicators).parameters
-        self._supports_ticker: bool = "ticker" in _params
-
         self._last_signal_spans: dict[str, int] = {}
 
     # ─────────────────────────────────────────────────────────────────
@@ -154,10 +149,9 @@ class TradingEngine:
         """
         self._last_signal_spans = {}
         with Span(SpanName.STRATEGY_CALC_TOTAL, collect=self._last_signal_spans):
-            if ticker is not None and self._supports_ticker:
-                df_ind = self.strategy.calculate_indicators(df, ticker=ticker)
-            else:
-                df_ind = self.strategy.calculate_indicators(df)
+            # No signature sniffing: the author body consumes delivered events,
+            # not a per-call ticker kwarg, so indicators always run over the bar df.
+            df_ind = self.strategy.calculate_indicators(df)
         with Span(SpanName.GENERATE_SIGNALS, collect=self._last_signal_spans):
             df_sig = self.strategy.generate_signals(df_ind)
         self._last_signal_spans[span_key(SpanName.RUN_SIGNALS)] = sum(

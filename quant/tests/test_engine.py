@@ -610,25 +610,23 @@ class TestTradingEngineInit:
         assert engine.strategy.config is config
         assert engine.strategy is strategy
 
-    def test_missing_calculate_indicators_raises(self, config):
-        bad = SimpleNamespace(generate_signals=lambda df: df)
-        with pytest.raises(TypeError, match="calculate_indicators"):
-            _make_engine(config, bad, _make_data_handler())
+    def test_strategy_without_legacy_methods_still_constructs(self, config):
+        """Constructions no longer enforce the 3-method contracted surface; a
+        strategy exposing only the declarative ``decide`` body constructs."""
 
-    def test_missing_generate_signals_raises(self, config):
-        bad = SimpleNamespace(calculate_indicators=lambda df: df)
-        with pytest.raises(TypeError, match="generate_signals"):
-            _make_engine(config, bad, _make_data_handler())
+        def decide(events, portfolio):
+            return []
 
-    def test_missing_manage_trade_raises(self, config):
-        """manage_trade is a mandatory StrategyProtocol method — a strategy
-        without it must be rejected at construction, not silently unmanaged."""
-        bad = SimpleNamespace(
-            calculate_indicators=lambda df: df,
-            generate_signals=lambda df: df,
+        s = SimpleNamespace(
+            name="decl",
+            config=config,
+            decide=decide,
+            instruments=[],
+            subscriptions=[],
+            venue="",
         )
-        with pytest.raises(TypeError, match="manage_trade"):
-            _make_engine(config, bad, _make_data_handler())
+        engine = _make_engine(config, s, _make_data_handler())
+        assert engine.strategy is s
 
     def test_custom_indicator_columns_from_strategy(self, config):
         s = _make_strategy()
@@ -666,13 +664,17 @@ class TestRunSignals:
         engine.run_signals(df, ticker=None)
         assert len(engine._signal_cache) == 0
 
-    def test_ticker_kwarg_forwarded(self):
+    def test_run_signals_no_ticker_signature_sniffing(self):
+        # A ticker-aware calculate_indicators is called without a ticker kwarg
+        # (the declarative surface feeds the author body events, not per-call
+        # tickers); run_signals still caches when a ticker tag is supplied.
         cfg = _make_config()
         s = _make_strategy(accept_ticker=True)
         engine = _make_engine(cfg, s, _make_data_handler())
         df = _make_ohlcv(3)
         result = engine.run_signals(df, ticker="SPY")
         assert not result.empty
+        assert "SPY" in engine._signal_cache
 
 
 class TestLatestSignal:

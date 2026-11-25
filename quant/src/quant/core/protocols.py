@@ -14,18 +14,23 @@ from quant.utils.strategy_config import BaseStrategyConfig
 
 @runtime_checkable
 class StrategyProtocol(Protocol):
-    """Minimal interface every strategy must satisfy.
-    ``config`` is a strategy-specific config object (subclass of ``BaseStrategyConfig``).
-    ``calculate_indicators``, ``generate_signals`` and ``manage_trade`` are
-    mandatory — the engine drives both entry and (manage-interval) exit
-    management through them.
+    """Declarative strategy surface (spec `strategy-authoring`).
+
+    A strategy declares its typed instruments, data subscriptions, and venue,
+    then implements a single author body ``decide(events, portfolio)`` that
+    BOTH generates entries and evaluates the portfolio's existing open
+    positions for exits. It returns typed ``Order``/exit intents — no signal
+    strings or 3-method contracted ``calculate_indicators`` /
+    ``generate_signals`` / ``manage_trade`` surface appears here.
     """
 
+    name: str
     config: BaseStrategyConfig
+    instruments: list[Any]
+    subscriptions: list[Any]
+    venue: str
 
-    def calculate_indicators(self, df: pd.DataFrame, **kw) -> pd.DataFrame: ...
-    def generate_signals(self, df: pd.DataFrame) -> pd.DataFrame: ...
-    def manage_trade(self, position: dict[str, Any], df: pd.DataFrame) -> int: ...
+    def decide(self, events, portfolio) -> list[Any]: ...
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -126,22 +126,18 @@ def test_run_signals_injects_indicators_and_buys() -> None:
     assert (signals["Signal"] == "BUY").sum() >= 1
 
 
-def test_missing_method_rejected_at_construction() -> None:
+def test_missing_methods_construct_with_declarative_surface() -> None:
+    """The 3-method contracted rejection is dissolved: a strategy carrying only
+    a config now constructs (the declarative ``decide`` body is engine-driven)."""
+
     class MissingManage:
         name = "missing_manage"
 
         def __init__(self) -> None:
             self.config = DemoMAConfig()
 
-        def calculate_indicators(self, df, **kw):
-            return df
-
-        def generate_signals(self, df):
-            return df
-
-    with pytest.raises(TypeError) as exc:
-        TradingEngine(MissingManage(), SynthDataHandler())
-    assert "manage_trade" in str(exc.value)
+    engine = TradingEngine(MissingManage(), SynthDataHandler())
+    assert engine.strategy.name == "missing_manage"
 
 
 def test_wrong_config_type_rejected_at_construction() -> None:
