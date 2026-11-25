@@ -1,9 +1,9 @@
 """Venue is the order seam (spec `strategy-authoring` / `execution`).
 
-Verifies the order flow: the author body builds typed ``Order``\\ s through
-``instrument.make_order``, the engine submits them to the declared venue's
-execution client, and the venue's reported fills feed the Portfolio the
-strategy reads. The strategy surface holds only the venue declaration and
+Verifies the order flow: the author body builds typed ``Order`` objects
+through ``instrument.make_order``, the engine submits them to the declared
+venue's execution client, and the venue's reported fills feed the Portfolio
+the strategy reads. The strategy surface holds only the venue declaration and
 typed seams — no broker SDK is reachable. Covers the backtest execution
 client's market/limit fill semantics and the no-fill (``None``) paths.
 """
@@ -32,8 +32,10 @@ class OrderStrategy(Strategy):
 
     name = "order_strategy"
     venue = "backtest"
-    instruments = [_ES]
-    subscriptions = [Subscription(instrument=_ES, datatype=Datatype.BARS, cadence="1h")]
+    instruments: ClassVar[list] = [_ES]
+    subscriptions: ClassVar[list] = [
+        Subscription(instrument=_ES, datatype=Datatype.BARS, cadence="1h")
+    ]
     config = BaseStrategyConfig(
         INTERVAL="1h",
         PRE_LOAD_DAYS=60,
@@ -55,8 +57,18 @@ class OrderStrategy(Strategy):
         return [_ES.make_order("BUY", 8, strategy=self.name)]
 
 
+class _FakeDataHandler:
+    """Enough of the data-handler surface for construction (never fetched)."""
+
+    def get_data(self, *args, **kwargs):
+        return None
+
+    def get_historical_data(self, *args, **kwargs):
+        return None
+
+
 def _engine() -> TradingEngine:
-    return TradingEngine(OrderStrategy(), data_handler=object())
+    return TradingEngine(OrderStrategy(), data_handler=_FakeDataHandler())
 
 
 def _spy_client(submitted: list[Order]):
@@ -120,7 +132,9 @@ class TestOrderReachesVenue:
 class TestFillFeedsPortfolio:
     def test_venue_fill_grows_portfolio_exposure(self) -> None:
         pf = Portfolio(starting_equity=100_000.0)
-        client = BacktestExecutionClient(price_source=lambda _order: 4_500.0, portfolio=pf)
+        client = BacktestExecutionClient(
+            price_source=lambda _order: 4_500.0, portfolio=pf
+        )
         venue = BacktestVenue(execution_client=client)
         order = _ES.make_order("BUY", 8, strategy="order_strategy")
 
@@ -129,14 +143,16 @@ class TestFillFeedsPortfolio:
 
         pos = pf.position("backtest", "ES")
         assert pos is not None
-        assert pos.qty == 8                     # filled quantity updates the schema
-        assert pos.direction == 1               # long
+        assert pos.qty == 8  # filled quantity updates the schema
+        assert pos.direction == 1  # long
         assert pos.avg_price == pytest.approx(4_500.0)
         assert pf.cash == pytest.approx(100_000.0 - 8 * 4_500.0)
 
     def test_sell_fill_opens_short_side(self) -> None:
         pf = Portfolio(starting_equity=100_000.0)
-        client = BacktestExecutionClient(price_source=lambda _order: 100.0, portfolio=pf)
+        client = BacktestExecutionClient(
+            price_source=lambda _order: 100.0, portfolio=pf
+        )
         order = _SPY.make_order("SELL", 10, strategy="order_strategy")
 
         _engine().submit_decisions(BacktestVenue(execution_client=client), pf, [order])
@@ -191,17 +207,23 @@ class TestBacktestExecutionClient:
 
     def test_buy_limit_fills_when_market_below_limit(self) -> None:
         client = BacktestExecutionClient(price_source=lambda _order: 4_400.0)
-        fill = client.submit(_ES.make_order("BUY", 4, price=4_500.0, price_type=OrderPriceType.LIMIT))
+        fill = client.submit(
+            _ES.make_order("BUY", 4, price=4_500.0, price_type=OrderPriceType.LIMIT)
+        )
         assert fill is not None and fill.price == pytest.approx(4_400.0)
 
     def test_buy_limit_not_crossed_returns_none(self) -> None:
         client = BacktestExecutionClient(price_source=lambda _order: 4_600.0)
-        fill = client.submit(_ES.make_order("BUY", 4, price=4_500.0, price_type=OrderPriceType.LIMIT))
+        fill = client.submit(
+            _ES.make_order("BUY", 4, price=4_500.0, price_type=OrderPriceType.LIMIT)
+        )
         assert fill is None
 
     def test_sell_limit_not_crossed_returns_none(self) -> None:
         client = BacktestExecutionClient(price_source=lambda _order: 4_400.0)
-        fill = client.submit(_ES.make_order("SELL", 4, price=4_500.0, price_type=OrderPriceType.LIMIT))
+        fill = client.submit(
+            _ES.make_order("SELL", 4, price=4_500.0, price_type=OrderPriceType.LIMIT)
+        )
         assert fill is None
 
     def test_no_price_source_fills_nothing(self) -> None:

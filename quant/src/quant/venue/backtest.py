@@ -10,8 +10,9 @@ closed (e.g. holidays); with no calendar the venue is open during its hours.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from datetime import time
-from typing import Any, Callable
+from typing import Any
 
 from quant.order import Order, OrderPriceType
 from quant.portfolio import Fill

@@ -731,9 +731,9 @@ class TradingEngine:
         portfolio: Any,
         decisions: Sequence[Any],
     ) -> list[Any]:
-        """Submit the author body's decided ``Order``\ s to *venue* and report fills.
+        """Submit the author body's decided orders to *venue* and report fills.
 
-        The declarative ``decide`` returns typed ``Order``\ s (built via
+        The declarative ``decide`` returns typed ``Order`` objects (built via
         ``instrument.make_order``); the engine submits each one to the
         declared venue's ``execution_client``. Any returned fill feeds
         ``portfolio`` (venue-owned fills — see ``BacktestExecutionClient``),

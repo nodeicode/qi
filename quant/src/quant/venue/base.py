@@ -17,8 +17,8 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 import pandas as pd
 
 if TYPE_CHECKING:
-    from quant.portfolio.base import Fill
     from quant.order import Order
+    from quant.portfolio.base import Fill
 
 # US-equity fallback hours (generous defaults, logged when the calendar is
 # unavailable) — mirrors the legacy ``MarketSchedule`` defaults.
