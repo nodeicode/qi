@@ -75,3 +75,33 @@ def test_violating_instrument_fails_loudly() -> None:
         except AssertionError:
             continue
         raise AssertionError(f"{root.label}: violating instrument must fail loudly")
+
+
+def test_instrument_missing_make_order_rejected() -> None:
+    # An adapter built without the order-construction surface (not an
+    # Instrument subclass, no make_order) must be rejected at the boundary.
+    class _NoMakeOrder:
+        symbol = "SPY"
+        venue = "alpaca"
+
+    problems = validate_instrument(_NoMakeOrder())
+    assert "instrument.make_order is missing" in problems
+    for root in ROOTS:
+        try:
+            conform(_NoMakeOrder(), root)
+        except AssertionError:
+            continue
+        raise AssertionError(
+            f"{root.label}: instrument missing make_order must fail loudly"
+        )
+
+
+def test_equity_missing_contract_facts_rejected() -> None:
+    # An equity definition that omits price_precision/lot_size (key sizing
+    # facts) must be surfaced by the conformance check, not relied on mid-run.
+    bad = EquityInstrument(
+        symbol="SPY", venue="alpaca", price_precision=None, lot_size=None
+    )
+    problems = validate_instrument(bad)
+    assert "equity.price_precision is missing" in problems
+    assert "equity.lot_size is missing" in problems
