@@ -9,6 +9,8 @@ discovery).
 """
 
 from quant.data._registry import (
+    datasource_offers,
+    find_sources,
     get_datasource,
     register_datasource,
 )
@@ -25,6 +27,8 @@ __all__ = [
     "Datatype",
     "Subscription",
     "SyntheticDataHandler",
+    "datasource_offers",
+    "find_sources",
     "get_datasource",
     "normalize_bars_frame",
     "register_datasource",
