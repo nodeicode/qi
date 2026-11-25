@@ -14,7 +14,7 @@ split it — never layer a parallel path.
 
 ## 1. Instrument spine — routing and contract facts on typed instruments
 
-- [ ] 1.1 Add the typed `Order` primitive (`quant/order.py`: side, quantity, instrument, venue, price context, timestamps) with canonical `to_schema`/`from_schema`; verify a schema round-trip test (spec `execution` `Typed order primitive`)
+- [x] 1.1 Add the typed `Order` primitive (`quant/order.py`: side, quantity, instrument, venue, price context, timestamps) with canonical `to_schema`/`from_schema`; verify a schema round-trip test (spec `execution` `Typed order primitive`)
 - [ ] 1.2 Put contract facts (multiplier, tick, lot, price precision, margin) and `make_order(side, qty, ...) -> Order` on the typed instruments (`quant/instruments/base.py`, equity/future/option); fold in `ContractSpec` data+math from `quant/core/_utils.py`; delete `ContractSpec`/`ProductSpecRegistry`/`PRODUCT_SPECS` so contract facts have one source (spec `instruments` `Typed instrument seed`)
 - [ ] 1.3 Extend `InstrumentConformance` to the order-construction surface; verify it accepts `EquityInstrument` and rejects an instrument missing `make_order`/contract facts (spec `instruments` `Instrument conformance`)
 - [ ] 1.4 Remove signal-string routing in place: replace `TradingEngine.route`/`direction` and `SIGNAL_REGISTRY`/`signal_asset_class`/`signal_direction` usage with typed-instrument resolution (spec `execution` `Asset-class routing` REMOVED); verify `OptionInstrument` on `FutureInstrument` underlying sizes/orders against both with no asset-class inference (spec `instruments`)
