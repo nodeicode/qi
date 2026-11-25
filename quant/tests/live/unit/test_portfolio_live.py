@@ -27,19 +27,10 @@ _logger = logging.getLogger("test_portfolio_live")
 # ---------------------------------------------------------------------------
 
 
-def _size_for_signal(signal, **kw):
-    equity = float(kw.get("equity", 0.0))
-    capital = equity * 0.1 * float(kw.get("pos_size", 1.0))
-    entry_price = float(kw.get("entry_price", 0.0))
-    shares = int(capital / entry_price) if entry_price > 0 else 0
-    return {"shares": shares, "effective_capital": capital}
-
-
 def _make_engine() -> MagicMock:
     eng = MagicMock()
     eng.route.return_value = "EQUITY"
     eng.direction.return_value = 1
-    eng.size_for_signal.side_effect = _size_for_signal
     eng.build_position.side_effect = lambda *a, **kw: {
         "AssetType": kw.get("AssetType", "EQUITY"),
         "Ticker": kw.get("Ticker", "SPY"),

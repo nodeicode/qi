@@ -16,7 +16,24 @@ this surface.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, ClassVar
+
+
+@dataclass(frozen=True)
+class ExitIntent:
+    """One manage-pass exit request for a position held in the injected portfolio.
+
+    The author body returns these alongside entry orders: each intent names
+    the strategy owning the position and the open position itself (read from
+    the injected ``portfolio``), plus an optional human-readable reason. The
+    engine routes every returned intent to the venue — no engine-side
+    evaluate_manage_exit machinery runs.
+    """
+
+    strategy: str
+    position: Any
+    reason: str = ""
 
 
 class Strategy:

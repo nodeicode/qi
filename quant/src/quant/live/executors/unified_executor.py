@@ -9,7 +9,6 @@ from alpaca.trading.models import Order
 from alpaca.trading.requests import MarketOrderRequest, OrderSide, TimeInForce
 
 from quant.core.engine import TradingEngine
-from quant.core.sizing import size_for_signal
 from quant.data.data_handler import AlpacaDataHandler
 from quant.live.protocols import LivePositionDict, LiveStrategyProtocol
 from quant.live.utils import MultiClientEquityManager
@@ -250,19 +249,17 @@ class UnifiedExecutor:
             )
             return None
 
-        # Sizing — shared with backtester via engine
+        # Quantity for the order: a fixed fraction of the active account's
+        # equity per trade, floored to whole shares (the registry dispatch it
+        # replaced is deleted; strategy-owned sizing lives on the author side
+        # in ``quant.strategies``).
         equity = self.equity_mgr.get()
         pos_size = float(
             signal_row.get("PositionSize", signal_row.get("Position_Size", 1.0))
         )
-        sizing = size_for_signal(
-            signal,
-            config=strategy.config,
-            equity=equity,
-            entry_price=entry_price,
-            pos_size=pos_size,
-        )
-        qty = sizing["shares"]
+        capital_frac = float(strategy.config.CAPITAL_PER_TRADE)
+        effective_capital = equity * capital_frac * pos_size
+        qty = int(effective_capital / entry_price) if entry_price > 0 else 0
 
         if qty < 1:
             self.logger.warning(f"[{strategy.name}] Qty < 1 for {ticker} — skipping.")

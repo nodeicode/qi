@@ -30,7 +30,6 @@ import sys
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
-import quant.live.executors.unified_executor as _ue_module
 from quant.live.executors.unified_executor import UnifiedExecutor
 from quant.live.protocols import LivePositionDict
 
@@ -56,30 +55,6 @@ def _make_executor(equity: float = 50000.0) -> UnifiedExecutor:
     return executor
 
 
-def _size_for_signal(signal, **kw):
-    """Mirror of the core sizing dispatch for test strategies/engines.
-
-    Producers call ``size_for_signal`` (the core module dispatch). Equity path
-    returns ``shares``; option/IC path returns ``n_contracts``, distinguished
-    by the keyword shape.
-    """
-    equity = float(kw.get("equity", 0.0))
-    capital = equity * 0.1 * float(kw.get("pos_size", 1.0))
-    if "premium_per_contract" in kw:
-        premium = float(kw["premium_per_contract"])
-        n = max(1, int(capital / premium)) if premium > 0 else 0
-        return {"n_contracts": n, "capital": capital}
-    price = float(kw.get("entry_price", 0.0))
-    shares = max(0, int(capital // price)) if price > 0 else 0
-    return {"shares": shares, "capital": capital}
-
-
-# Producers call quant.core.sizing.size_for_signal directly (the engine shim is
-# gone). Rebind the executor module's symbol to the deterministic fake so these
-# tests exercise the real producer path with stable sizing.
-_ue_module.size_for_signal = _size_for_signal
-
-
 def _make_engine(route: str = "EQUITY") -> MagicMock:
     """Minimal TradingEngine mock — required for enter_trade routing/sizing."""
     eng = MagicMock()
@@ -94,7 +69,6 @@ def _make_engine(route: str = "EQUITY") -> MagicMock:
     }.get(str(signal).upper(), route)
     eng.direction.return_value = 1
 
-    eng.size_for_signal.side_effect = _size_for_signal
     eng.select_strike.side_effect = lambda price, opt_type: round(price)
     eng.build_position.side_effect = lambda *a, **kw: {
         "AssetType": kw.get("AssetType", "EQUITY"),

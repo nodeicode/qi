@@ -7,7 +7,6 @@ from quant.backtest.executors.base_executor import (
     tradable_close_at,
 )
 from quant.backtest.utils import apply_slippage, calculate_fill_time
-from quant.core.sizing import size_for_signal
 from quant.portfolio import Fill, Side
 
 
@@ -44,14 +43,20 @@ class EquityExecutor(BaseBacktestExecutor):
         raw_entry = tradable_close_at(df_entry.iloc[0])
         entry_price = apply_slippage(self.config, raw_entry, direction, is_entry=True)
 
+        # Fill quantity for the simulated entry: a fixed fraction of the
+        # run's starting equity per trade, floored to whole shares. This is
+        # the fill-simulation sizing leg (the registry dispatch it replaced
+        # is deleted); strategy-owned sizing on instrument contract facts +
+        # the portfolio lives on the author side in ``quant.strategies``.
         pos_size = float(row.get("Position_Size", 1.0))
-        sizing = size_for_signal(
-            signal,
-            config=self.config,
-            equity=self._constant_equity(),
-            entry_price=entry_price,
-            pos_size=pos_size,
-        )
+        capital_frac = float(self.config.CAPITAL_PER_TRADE)
+        effective_capital = self._constant_equity() * capital_frac * pos_size
+        shares = int(effective_capital / entry_price) if entry_price > 0 else 0
+        sizing = {
+            "effective_capital": effective_capital,
+            "shares": shares,
+            "capital_fraction": capital_frac,
+        }
 
         position = dict(
             self.engine.build_position(

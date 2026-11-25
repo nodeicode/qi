@@ -32,7 +32,6 @@ _ROOT = Path(__file__).resolve().parents[1] / "src" / "quant"
 _DISALLOWED_RELS = [
     "core/engine.py",
     "core/protocols.py",
-    "core/sizing.py",
     "backtest/backtester.py",
     "backtest/base_backtest.py",
     "backtest/backtest_data_handler.py",

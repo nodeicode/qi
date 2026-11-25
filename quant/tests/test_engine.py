@@ -22,7 +22,6 @@ Covers:
   - TradingEngine.process_ticker (exit + entry pipeline)
   - TradingEngine.process_ticker signal HOLD reason logged / suppressed
   - TradingEngine.process_ticker actionable signal reason included in log
-  - TradingEngine.size_for_signal (registry sizing dispatch)
   - TradingEngine.build_position
 """
 
@@ -61,7 +60,6 @@ from quant.core._utils import (
 )
 from quant.core.engine import TradingEngine
 from quant.core.protocols import PositionDict
-from quant.core.sizing import size_for_signal
 from quant.utils.positions import build_position_dict
 from quant.utils.strategy_config import BaseStrategyConfig
 from quant.utils.time import (
@@ -99,11 +97,6 @@ class _TestStrategyConfig(BaseStrategyConfig):
 
     OPTION_STRIKE_METHOD: str = "atm"
     DAILY_START: str | None = None
-    MAX_CAPITAL_PER_TRADE: float = 1e9
-    USE_CONFIDENCE_SIZING: bool = False
-    CONFIDENCE_SIZING_TIERS: list[tuple[float, float]] = field(
-        default_factory=lambda: [(0.50, 0.20)]
-    )
     SLIPPAGE_PER_SHARE: float = 0.0
 
 
@@ -1022,99 +1015,6 @@ class TestProcessTicker:
 
 
 # ========================================================================
-# 16. Sizing methods
-# ========================================================================
-
-
-class TestSizing:
-    def test_size_equity(self, engine):
-        result = size_for_signal(
-            "BUY", config=engine.strategy.config, equity=100_000, entry_price=50.0
-        )
-        assert result["effective_capital"] == 100_000 * 0.10
-        assert result["shares"] == int(10_000 / 50.0)
-
-    def test_size_equity_with_pos_size(self, engine):
-        result = size_for_signal(
-            "BUY",
-            config=engine.strategy.config,
-            equity=100_000,
-            entry_price=50.0,
-            pos_size=0.5,
-        )
-        assert result["effective_capital"] == 100_000 * 0.10 * 0.5
-
-    def test_size_equity_zero_price(self, engine):
-        result = size_for_signal(
-            "BUY", config=engine.strategy.config, equity=100_000, entry_price=0.0
-        )
-        assert result["shares"] == 0
-
-    def test_size_option(self, engine):
-        result = size_for_signal(
-            "BUY_CALL",
-            config=engine.strategy.config,
-            equity=100_000,
-            premium_per_contract=5.0,
-        )
-        assert result["n_contracts"] >= 1
-        assert result["capital"] == 100_000 * 0.10
-
-    def test_size_option_zero_premium(self, engine):
-        result = size_for_signal(
-            "BUY_CALL",
-            config=engine.strategy.config,
-            equity=100_000,
-            premium_per_contract=0.0,
-        )
-        assert result["n_contracts"] == 0
-
-    def test_size_spread(self, engine):
-        result = size_for_signal(
-            "BUY_SPREAD", config=engine.strategy.config, entry_price_per_share=2.0
-        )
-        assert result["n_contracts"] >= 1
-        assert result["capital"] == 0.10  # CAPITAL_PER_TRADE as dollar
-
-    def test_size_ic_without_confidence(self, engine):
-        result = size_for_signal(
-            "SELL_IC",
-            config=engine.strategy.config,
-            equity=100_000,
-            confidence=0.7,
-            collateral_per_contract=500.0,
-        )
-        assert result["n_contracts"] >= 1
-        assert result["collateral_per_contract"] == 500.0
-
-    def test_size_ic_zero_collateral(self, engine):
-        result = size_for_signal(
-            "SELL_IC",
-            config=engine.strategy.config,
-            equity=100_000,
-            confidence=0.7,
-            collateral_per_contract=0.0,
-        )
-        assert result["n_contracts"] == 0
-
-    def test_size_ic_with_confidence_tiers(self):
-        cfg = _make_config(
-            USE_CONFIDENCE_SIZING=True,
-            CONFIDENCE_SIZING_TIERS=[(0.5, 0.10), (0.8, 0.20)],
-            MAX_CAPITAL_PER_TRADE=50_000,
-        )
-        result = size_for_signal(
-            "SELL_IC",
-            config=cfg,
-            equity=100_000,
-            confidence=0.85,
-            collateral_per_contract=500.0,
-        )
-        # conf=0.85 >= 0.80 tier → cpt=0.20, capital = 100k * 0.20 = 20k
-        assert result["capital"] == 20_000
-
-
-# ========================================================================
 # 17. build_position
 # ========================================================================
 
@@ -1400,68 +1300,6 @@ class TestProcessTickerBranches:
             "Actionable signal" in r.message and "am_filter pass" in r.message
             for r in caplog.records
         )
-
-
-# ========================================================================
-# 27. size_for_signal IC confidence sizing tiers
-# ========================================================================
-
-
-class TestSizeIcConfidenceTiers:
-    def test_tier_matched_by_confidence(self):
-        """USE_CONFIDENCE_SIZING=True — correct tier fraction used."""
-        cfg = _make_config(
-            USE_CONFIDENCE_SIZING=True,
-            CONFIDENCE_SIZING_TIERS=[(0.80, 0.30), (0.50, 0.15), (0.0, 0.05)],
-            CAPITAL_PER_TRADE=0.10,
-            MAX_CAPITAL_PER_TRADE=1e9,
-        )
-        result = size_for_signal(
-            "SELL_IC",
-            config=cfg,
-            equity=100_000,
-            confidence=0.85,
-            collateral_per_contract=500,
-        )
-        # Tier (0.80, 0.30) matched → capital = 100_000 * 0.30 = 30_000
-        assert result["capital"] == pytest.approx(30_000)
-        assert result["n_contracts"] == 60
-
-    def test_tier_fallback_to_lowest(self):
-        """Confidence below all tiers → fall through, last tier wins."""
-        cfg = _make_config(
-            USE_CONFIDENCE_SIZING=True,
-            CONFIDENCE_SIZING_TIERS=[(0.80, 0.30), (0.50, 0.15)],
-            CAPITAL_PER_TRADE=0.10,
-            MAX_CAPITAL_PER_TRADE=1e9,
-        )
-        # confidence=0.3 < 0.50 — no tier matched, cpt stays at CAPITAL_PER_TRADE
-        result = size_for_signal(
-            "SELL_IC",
-            config=cfg,
-            equity=100_000,
-            confidence=0.3,
-            collateral_per_contract=500,
-        )
-        assert result["capital"] == pytest.approx(10_000)  # 0.10 * 100_000
-
-    def test_absolute_cpt_above_one(self):
-        """cpt >= 1.0 is treated as an absolute dollar cap."""
-        cfg = _make_config(
-            USE_CONFIDENCE_SIZING=True,
-            CONFIDENCE_SIZING_TIERS=[(0.0, 5000.0)],
-            CAPITAL_PER_TRADE=0.10,
-            MAX_CAPITAL_PER_TRADE=1e9,
-        )
-        result = size_for_signal(
-            "SELL_IC",
-            config=cfg,
-            equity=100_000,
-            confidence=0.9,
-            collateral_per_contract=500,
-        )
-        assert result["capital"] == pytest.approx(5_000.0)
-        assert result["n_contracts"] == 10
 
 
 # ========================================================================
