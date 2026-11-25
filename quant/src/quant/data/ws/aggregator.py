@@ -28,6 +28,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from quant.data.subscription import Datatype, Subscription, normalize_bars_frame
 from quant.data.ws.protocols import MinuteBar
 
 # Column order matches get_historical_data output (Title-case) plus the symbol column.
@@ -158,6 +159,95 @@ class MemBarsAggregator:
             return None, cov
         frame = self.window(key, self._ts[key][0], self._ts[key][n - 1])
         return frame, cov
+
+    # ── subscription surface (spec `data-access` Live streaming to buffers) ──
+
+    def _sub_store_key(self, subscription: Subscription) -> tuple[str, str, str]:
+        """Map a bars subscription to the underlying (symbol, cadence, adj) store.
+
+        The live edge equals ``all`` (adjustment rewrites history, never the
+        tail), so a subscription buffer maps to the ``"all"`` key.
+        """
+        if subscription.datatype is not Datatype.BARS:
+            raise ValueError(f"MemBars streams bars only, got {subscription.datatype}")
+        return (subscription.instrument.symbol.upper(), subscription.cadence, "all")
+
+    def subscribe(self, subscription: Subscription) -> None:
+        """Declare a per-subscription buffer (register its store key).
+
+        Idempotent: the store array is created lazily on the first seed/append,
+        so calling this before a stream starts just reserves the key.
+        """
+        key = self._sub_store_key(subscription)
+        self._ensure_cap(key, self._n.get(key, 0))
+
+    def seed_subscription(
+        self, subscription: Subscription, frame: pd.DataFrame, seed_end=None
+    ) -> None:
+        """Seed a subscription buffer from history (REST/replay), per-subscription.
+
+        Delegates to the authoritative :meth:`seed` span logic so a pre-open
+        warmup tags the buffer through the next decision bar while the live
+        stream supplies the edge.
+        """
+        key = self._sub_store_key(subscription)
+        self.seed(key[0], key[1], key[2], frame, seed_end)
+
+    def append_settled(
+        self,
+        subscription: Subscription,
+        *,
+        timestamp,
+        open: float,
+        high: float,
+        low: float,
+        close: float,
+        volume: float,
+    ) -> None:
+        """Append one settled bar to a subscription buffer (stream write path).
+
+        The row must already be a fully-formed bar for the subscription's
+        cadence; appending is an O(1) array store — never a per-bar re-fetch or
+        re-parse of source data. Reads therefore never see a partial bar: only
+        settled bars are appended, atomically. Stale/duplicate stamps are
+        ignored so re-connects stay idempotent.
+        """
+        key = self._sub_store_key(subscription)
+        ts = pd.Timestamp(timestamp)
+        if ts.tzinfo is not None:
+            ts = ts.tz_convert("UTC").tz_localize(None)
+        ts_ns = ts.value
+        n = self._n.get(key, 0)
+        if n and self._ts[key][n - 1] >= np.datetime64(ts_ns, "ns"):
+            return  # stale or duplicate — do not regress the buffer tail
+        self._ensure_cap(key, n + 1)
+        i = self._n[key]
+        self._ts[key][i] = ts_ns
+        cols = self._cols[key]
+        cols["Open"][i] = open
+        cols["High"][i] = high
+        cols["Low"][i] = low
+        cols["Close"][i] = close
+        cols["Volume"][i] = volume
+        self._n[key] = i + 1
+        self._bump_cov(key, ts_ns)
+        self._extend_built(
+            key,
+            ts_ns,
+            {"open": open, "high": high, "low": low, "close": close, "volume": volume},
+        )
+
+    def subscription_window(
+        self, subscription: Subscription, start, end
+    ) -> pd.DataFrame:
+        """Read a subscription buffer's ``[start, end]`` window (canonical shape).
+
+        Returns exactly the canonical bars columns with naive-UTC timestamps,
+        matching the backtest replay shape for the same subscription.
+        """
+        key = self._sub_store_key(subscription)
+        frame = self.window(key, start, end)
+        return normalize_bars_frame(frame) if not frame.empty else frame
 
     # ── write side (single writer enforced by callers) ───────────────────────
     def seed(self, ticker, interval, adjustment, frame, seed_end=None) -> None:
