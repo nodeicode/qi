@@ -41,6 +41,11 @@ class BacktestDataHandler:
         Interval string matching ``strategy.config.INTERVAL``.
     manage_interval
         Interval string matching ``strategy.config.MANAGE_INTERVAL``.
+
+    Subscription buffers: ``seed`` feeds a pre-loaded frame keyed by
+    ``(instrument, datatype, cadence)``; ``get_data`` replays from that buffer
+    (a ``searchsorted`` window — no re-parse per bar), so the backtester loads
+    each declared subscription once and the per-bar loop just consumes it.
     """
 
     def __init__(
@@ -54,6 +59,21 @@ class BacktestDataHandler:
         self._df_manage = df_manage
         self._signal_interval = signal_interval
         self._manage_interval = manage_interval
+        # Subscription-keyed replay buffers ``key -> pre-loaded frame``.
+        self._buffers: dict[tuple, pd.DataFrame] = {}
+
+    def seed(self, subscription: Subscription, frame: pd.DataFrame) -> None:
+        """Feed a pre-loaded frame under a subscription's key (replayed on reads).
+
+        Callers (``Backtester._prefetch_data``) seed each declared bars
+        subscription once; ``get_data`` then serves index windows from the
+        buffer with no re-fetch or re-parse per bar.
+        """
+        if subscription.datatype is not Datatype.BARS:
+            raise ValueError(
+                f"BacktestDataHandler seeds bars buffers only, got {subscription.datatype}"
+            )
+        self._buffers[subscription.key()] = frame if frame.empty else frame.sort_index()
 
     def get_historical_data(
         self,
@@ -103,9 +123,21 @@ class BacktestDataHandler:
             raise ValueError(
                 f"BacktestDataHandler ships bars only, got {subscription.datatype}"
             )
-        df = self._frame_for_interval(subscription.cadence)
+        df = self._frame_for_subscription(subscription)
         window = self._slice_window(df, start, end, subscription.cadence)
         return normalize_bars_frame(window) if not window.empty else window
+
+    def _frame_for_subscription(self, subscription: Subscription) -> pd.DataFrame:
+        """Return the replay buffer for *subscription*, falling back to a frame.
+
+        A seeded buffer wins; otherwise a cadence that matches the pre-loaded
+        signal/manage frame is used. An unseeded, unmatched cadence yields an
+        empty stream (never raises).
+        """
+        buffer = self._buffers.get(subscription.key())
+        if buffer is not None:
+            return buffer
+        return self._frame_for_interval(subscription.cadence)
 
     def _frame_for_interval(self, interval: str) -> pd.DataFrame:
         """Return the pre-loaded frame whose cadence matches *interval* (or empty)."""

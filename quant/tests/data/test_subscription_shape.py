@@ -76,3 +76,33 @@ def test_subscription_rejects_non_bars_datatype() -> None:
     assert synth.get_data(sub, "2023-06-01", "2023-07-01").columns.equals(
         pd.Index(BARS_COLUMNS)
     )
+
+
+def test_seeded_buffer_replays_without_reparse() -> None:
+    # A seeded subscription buffer is replayed by index window (no re-parse of
+    # source data), and an out-of-range window returns empty without raising.
+    idx = pd.date_range("2023-06-01", periods=60, freq="B")
+    df = _bars(idx)
+    h = BacktestDataHandler(pd.DataFrame(), pd.DataFrame(), "unused", "1d")
+    instrument = EquityInstrument(symbol="SPY", venue="paper")
+    sub = Subscription(instrument=instrument, datatype=Datatype.BARS, cadence="1d")
+    h.seed(sub, df)
+
+    win = h.get_data(sub, "2023-06-05", "2023-06-15")
+    assert not win.empty
+    assert list(win.columns) == list(BARS_COLUMNS)
+
+    # Beyond the seeded window the replay returns an empty stream, no raise.
+    out_of_range = h.get_data(sub, "2025-01-01", "2025-02-01")
+    assert out_of_range.empty
+
+
+def test_unseeded_cadence_still_resolves_from_preloaded_frame() -> None:
+    idx = pd.date_range("2023-06-01", periods=60, freq="B")
+    df = _bars(idx)
+    h = BacktestDataHandler(df, df, "1d", "1d")
+    instrument = EquityInstrument(symbol="SPY", venue="paper")
+    sub = Subscription(instrument=instrument, datatype=Datatype.BARS, cadence="1d")
+    out = h.get_data(sub, "2023-06-01", "2023-06-10")
+    assert not out.empty
+    assert list(out.columns) == list(BARS_COLUMNS)

@@ -35,6 +35,8 @@ from quant.backtest.base_backtest import BaseBacktester
 from quant.backtest.executors import BacktestExecContext, ExecutorRouter
 from quant.core.engine import TradingEngine
 from quant.core.protocols import DataHandlerProtocol
+from quant.data.subscription import Datatype, Subscription
+from quant.instruments import EquityInstrument
 from quant.utils.strategy_config import BaseStrategyConfig
 
 
@@ -120,6 +122,9 @@ class Backtester(BaseBacktester):
         # Pre-fetched caches (populated in _prepare_data)
         self._df_manage: pd.DataFrame = pd.DataFrame()
         self._df_manage_1m: pd.DataFrame = pd.DataFrame()
+        # Subscription-keyed replay buffers fed once by ``_prefetch_data`` and
+        # seeded into the per-run data handler so ``get_data`` replays them.
+        self._subscription_buffers: dict[tuple, pd.DataFrame] = {}
 
     # ==================================================================
     # Public API
@@ -208,6 +213,23 @@ class Backtester(BaseBacktester):
             signal_interval=signal_interval,
             manage_interval=manage_interval,
         )
+        # Replay the pre-fetched subscription buffers (fed once in
+        # ``_prefetch_data``) so ``get_data`` windows them with no re-parse.
+        for (
+            venue,
+            symbol,
+            datatype,
+            cadence,
+        ), frame in self._subscription_buffers.items():
+            data_handler.seed(
+                Subscription(
+                    instrument=EquityInstrument(symbol=symbol, venue=venue),
+                    datatype=datatype,
+                    cadence=cadence,
+                ),
+                frame,
+            )
+
         self.engine.data_handler = cast(
             "DataHandlerProtocol", data_handler
         )  # inject preloaded data handler
@@ -270,3 +292,11 @@ class Backtester(BaseBacktester):
         )
         if not self._df_manage.empty:
             self._df_manage = self._df_manage.sort_index()
+        # Feed the bars replay buffer for the manage cadence exactly once, so
+        # the per-bar loop consumes a pre-loaded stream (no re-fetch/parse).
+        manage_sub = Subscription(
+            instrument=EquityInstrument(symbol=self.ticker, venue=self.venue),
+            datatype=Datatype.BARS,
+            cadence=manage_interval,
+        )
+        self._subscription_buffers[manage_sub.key()] = self._df_manage
