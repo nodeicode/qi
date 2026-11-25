@@ -37,11 +37,8 @@ class OrderStrategy(Strategy):
         Subscription(instrument=_ES, datatype=Datatype.BARS, cadence="1h")
     ]
     config = BaseStrategyConfig(
-        INTERVAL="1h",
         PRE_LOAD_DAYS=60,
-        MANAGE_INTERVAL="1h",
         INITIAL_CAPITAL=100_000.0,
-        CAPITAL_PER_TRADE=0.95,
         MAX_CONCURRENT_POSITIONS=1,
         STOP_LOSS_PERCENT=0.05,
         TAKE_PROFIT_PERCENT=-1.0,
@@ -49,7 +46,11 @@ class OrderStrategy(Strategy):
         MAX_HOLDING_MINUTES=60 * 24 * 30,
         MIN_SIGNAL_CONFIDENCE=0.0,
         BASE_SLIPPAGE_FACTOR=0.0,
-        TICKERS=["ES"],
+        instruments=[_ES],
+        subscriptions=[
+            Subscription(instrument=_ES, datatype=Datatype.BARS, cadence="1h")
+        ],
+        venue="backtest",
     )
 
     def decide(self, events, portfolio) -> list:

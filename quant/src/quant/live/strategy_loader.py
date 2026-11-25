@@ -10,6 +10,25 @@ from quant.strategies import get_strategy  # layering-ok  (single dynamic-load l
 _PROD_CLIENTS = {"prod"}
 
 
+# The legacy 3-method contract (calculate_indicators / generate_signals /
+# manage_trade) was replaced by the declarative single author body
+# ``decide(events, portfolio)``. A strategy exposing only those three methods
+# and no ``decide`` is a legacy strategy with NO migration shim — it is rejected
+# at load time rather than silently run through a pipeline it does not fit.
+_LEGACY_THREE_METHODS = (
+    "calculate_indicators",
+    "generate_signals",
+    "manage_trade",
+)
+
+
+def _is_legacy_three_method(strategy) -> bool:
+    """True when ``strategy`` is the removed 3-method contract (no ``decide``)."""
+    return all(hasattr(strategy, m) for m in _LEGACY_THREE_METHODS) and not hasattr(
+        strategy, "decide"
+    )
+
+
 def load_strategies(
     config: dict[str, Any], data_handler: AlpacaDataHandler, logger: logging.Logger
 ) -> list[LiveStrategyProtocol]:
@@ -62,6 +81,17 @@ def load_strategies(
             try:
                 strategy = StrategyClass()
 
+                # The declarative surface replaced the legacy 3-method contract;
+                # a legacy strategy is rejected with no migration shim.
+                if _is_legacy_three_method(strategy):
+                    logger.error(
+                        f"Strategy '{base_name}' for client '{client_name}' exposes only "
+                        "the legacy 3-method contract (calculate_indicators / "
+                        "generate_signals / manage_trade) with no decide(events, "
+                        "portfolio) body — rejected (no migration shim)."
+                    )
+                    continue
+
                 # Apply Config Overrides
                 overrides = strat_conf.get("config", {})
                 if hasattr(strategy, "config") and overrides:
@@ -75,6 +105,11 @@ def load_strategies(
                 strategy.name = f"{base_name}_{client_name}"
                 strategy.env = "prod" if client_name in _PROD_CLIENTS else "paper"
                 strategy.client_name = client_name
+                # Venue comes from the strategy declaration (class attr or
+                # config.venue, which overrides may have just set).
+                strategy.venue = getattr(strategy, "venue", "") or getattr(
+                    getattr(strategy, "config", None), "venue", ""
+                )
 
                 strategies.append(cast("LiveStrategyProtocol", strategy))
                 logger.info(

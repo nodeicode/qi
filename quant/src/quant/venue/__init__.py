@@ -7,7 +7,12 @@ answers from the simulation timeline (determinism). Timezone lives inside the
 adapters; the decision boundary is naive-UTC (``to_utc_naive``).
 """
 
-from quant.venue._registry import register_venue, venue_by_name
+from quant.venue._registry import (
+    register_venue,
+    registered_venues,
+    venue_by_name,
+    venue_registered,
+)
 from quant.venue.alpaca import AlpacaCalendar, AlpacaVenue
 from quant.venue.backtest import BacktestExecutionClient, BacktestVenue
 from quant.venue.base import (
@@ -38,6 +43,8 @@ __all__ = [
     "SessionDay",
     "Venue",
     "register_venue",
+    "registered_venues",
     "to_utc_naive",
     "venue_by_name",
+    "venue_registered",
 ]

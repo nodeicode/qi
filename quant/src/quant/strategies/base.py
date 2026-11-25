@@ -19,6 +19,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
+from quant.venue import registered_venues, venue_registered
+
 
 @dataclass(frozen=True)
 class ExitIntent:
@@ -56,6 +58,23 @@ class Strategy:
     subscriptions: ClassVar[list[Any]] = []
     #: Declared venue id the strategy's orders route to.
     venue: ClassVar[str] = ""
+
+    def __init__(self) -> None:
+        """Validate the declared venue id at construction.
+
+        A non-empty ``venue`` (from the class attribute or, failing that, the
+        strategy's ``config.venue``) must be a registered venue id; an unknown
+        id is rejected here with a readable error listing the registered ids.
+        Venues are resolved (wired) later, at execution time.
+        """
+        venue = getattr(self, "venue", "") or getattr(
+            getattr(self, "config", None), "venue", ""
+        )
+        if venue and not venue_registered(venue):
+            raise ValueError(
+                f"Strategy {type(self).__name__!r} declares unknown venue "
+                f"{venue!r}; registered venues: {registered_venues()}"
+            )
 
     def decide(self, events, portfolio) -> list[Any]:
         """Author body: generate entries and evaluate positions for exits.

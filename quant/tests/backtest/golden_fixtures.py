@@ -109,13 +109,17 @@ class GoldenEquityStrategy:
 
 
 def make_config(**overrides) -> BaseStrategyConfig:
-    """Frozen config for the golden equity run."""
+    """Frozen config for the golden equity run.
+
+    The engine-driven knobs (``INTERVAL`` / ``MANAGE_INTERVAL`` /
+    ``CAPITAL_PER_TRADE`` / ``TICKERS``) are no longer config fields — they are
+    set here as plain attributes because the legacy 3-method golden strategy
+    still runs through the legacy equity executor that reads them. This
+    fixture is re-pinned to the declarative transcript in a later step (5.4).
+    """
     cfg = BaseStrategyConfig(
-        INTERVAL="1d",
-        MANAGE_INTERVAL="1d",
         PRE_LOAD_DAYS=PRELOAD,
         INITIAL_CAPITAL=10_000.0,
-        CAPITAL_PER_TRADE=0.1,
         MAX_CONCURRENT_POSITIONS=2,
         STOP_LOSS_PERCENT=0.30,
         TAKE_PROFIT_PERCENT=-1.0,  # disabled sentinel
@@ -123,9 +127,13 @@ def make_config(**overrides) -> BaseStrategyConfig:
         MAX_HOLDING_MINUTES=43_200,  # 30 days - never force-exits mid-run
         MIN_SIGNAL_CONFIDENCE=0.5,
         BASE_SLIPPAGE_FACTOR=0.0,
-        TICKERS=[TICKER],
         DATA_DELAY=0,
     )
+    # Legacy engine-driven knobs the legacy golden executor still reads.
+    cfg.INTERVAL = "1d"
+    cfg.MANAGE_INTERVAL = "1d"
+    cfg.CAPITAL_PER_TRADE = 0.1
+    cfg.TICKERS = [TICKER]
     for key, value in overrides.items():
         setattr(cfg, key, value)
     return cfg
