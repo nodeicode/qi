@@ -2,14 +2,14 @@
 Trading Engine — centralized decision logic for backtest and live.
 =================================================================
 
-Both the backtester (``BacktestExecutor``) and live trader instantiate a
+Both the backtester and live trader instantiate a
 ``TradingEngine`` per strategy.  **Every** trading decision — signal
 generation, entry gating, sizing, indicator injection, manage_trade,
 and position schema — flows through this class so that both environments
 run identical logic.
 
 Environment-specific concerns (simulated fills vs API orders) remain
-in the ``ExecutorProtocol`` implementor; this module owns the
+in the venue's execution client; this module owns the
 *decisions*, not the *execution*.
 
 Pipeline (via ``process_strategy``)

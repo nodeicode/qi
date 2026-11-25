@@ -100,7 +100,7 @@ def test_portfolio_recovers_across_restart(tmp_path) -> None:
 
 
 class _PaperExecutor:
-    """Minimal ``ExecutorProtocol`` stand-in for the paper smoke.
+    """Minimal venue execution-client stand-in for the paper smoke.
 
     Parameter names match the engine's keyword calls (``ran_signal`` etc.);
     ``get_precomputed_signal`` returns ``None`` so the engine computes signals

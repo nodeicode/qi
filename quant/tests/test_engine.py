@@ -1448,7 +1448,7 @@ class TestProcessTickerExtraBranches:
 
 
 class _FakeExecutor:
-    """Minimal ExecutorProtocol-compatible implementation for process_strategy tests."""
+    """Minimal execution-client stand-in for ``process_strategy`` tests."""
 
     def __init__(
         self,
