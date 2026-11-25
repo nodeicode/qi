@@ -76,7 +76,8 @@ class TestUnifiedTraderMultiStrategy(unittest.TestCase):
 
     @patch("quant.live.trader.load_state", return_value={})
     @patch(
-        "quant.live.trader.AlpacaVenue", side_effect=lambda *a, **k: always_open_venue()
+        "quant.live.trader.venue_by_name",
+        side_effect=lambda *a, **k: always_open_venue(),
     )
     @patch("quant.live.trader.AlpacaDataHandler")
     @patch("quant.live.trader.MarketSchedule")

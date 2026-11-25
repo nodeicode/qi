@@ -54,7 +54,6 @@ from quant.utils.time import closed_bar_asof
 if TYPE_CHECKING:
     from quant.core.protocols import (
         DataHandlerProtocol,
-        ExecutorProtocol,
         PositionDict,
         StrategyProtocol,
     )
@@ -519,17 +518,15 @@ class TradingEngine:
     # Top-level orchestration  (live + backtest entrypoint)
     # ─────────────────────────────────────────────────────────────────
 
-    def process_strategy(
-        self, strategy, now: datetime.datetime, executor: ExecutorProtocol
-    ) -> None:
+    def process_strategy(self, strategy, now: datetime.datetime, executor: Any) -> None:
         """Run one full processing tick for *strategy* at *now*.
 
         Mirrors the live ``trader.process_strategy`` + ``execute_signals``
         pipeline.  Environment-specific behaviour (scheduling, order
         submission, fill simulation, position-state mutation) is
-        delegated to *executor*; data fetching lives on the engine via
-        ``self.data_handler`` (live: ``AlpacaDataHandler``; backtest:
-        ``BacktestDataHandler``).
+        delegated to the fill seam *executor* resolves to; data fetching
+        lives on the engine via ``self.data_handler`` (live:
+        ``AlpacaDataHandler``; backtest: ``BacktestDataHandler``).
 
         Pipeline:
           1. ``executor.should_run`` — decide signal / manage phases.
@@ -543,6 +540,13 @@ class TradingEngine:
              d. Dispatch EXIT / ENTRY via ``executor.exit`` / ``enter``.
           4. ``executor.record_run`` — dedup bookkeeping.
         """
+        # The driver hands in the wired venue it resolved from the strategy
+        # declaration (spec `execution` Venue resolved from the strategy
+        # declaration); its execution client is the fill seam this loop drives.
+        # A bare execution client is also accepted (callers that already hold
+        # one). Both stay valid here until the engine reshape retitles the
+        # parameter to *venue*.
+        executor = getattr(executor, "execution_client", None) or executor
         s_name: str = getattr(strategy, "name", type(strategy).__name__)
 
         interval = getattr(strategy.config, "INTERVAL", "1h")

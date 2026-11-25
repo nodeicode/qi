@@ -39,7 +39,12 @@ from quant.core.protocols import DataHandlerProtocol
 from quant.data.subscription import Datatype, Subscription
 from quant.instruments import EquityInstrument
 from quant.utils.strategy_config import BaseStrategyConfig
-from quant.venue import BacktestExecutionClient
+from quant.venue import (
+    BacktestExecutionClient,
+    registered_venues,
+    venue_by_name,
+    venue_registered,
+)
 
 
 class Backtester(BaseBacktester):
@@ -69,7 +74,28 @@ class Backtester(BaseBacktester):
         # Portfolio-collecting mode (spec `portfolio`): when set, simulated
         # fills stream into this Portfolio — the same primitives as live.
         self.portfolio = portfolio
-        self.venue = venue
+
+        # Resolve the declared venue id at construction (spec `execution` Venue
+        # resolved from the strategy declaration): only a registered id builds
+        # a run and an unknown id fails loudly with the registered ids.
+        # Precedence: the strategy's declared venue, then the explicit
+        # constructor arg, else the backtest default.
+        _declared = getattr(strategy, "venue", "") or getattr(
+            getattr(strategy, "config", None), "venue", ""
+        )
+        _declared_id = _declared or venue or "backtest"
+        if not venue_registered(_declared_id):
+            raise ValueError(
+                f"Unknown venue {_declared_id!r}; registered venues: "
+                f"{registered_venues()}"
+            )
+        # The backtest run always fills through the deterministic simulation-timeline
+        # venue (the only venue that must answer from the injected ``now``); its
+        # ``data_source``/``execution_client`` are wired when the execution client is
+        # built (``_build_execution_client``).
+        self._venue = venue_by_name("backtest")
+        # ``venue`` is the resolved venue id used as the fill/position label.
+        self.venue = self._venue.id
 
         # When verbose, also surface logs from engine + data + strategy loggers so
         # internal decisions (signal gating, manage_trade, fills) are visible
@@ -198,6 +224,10 @@ class Backtester(BaseBacktester):
             venue=self.venue,
             update_reason_stats=self.update_reason_stats,
         )
+        # Wire the resolved venue's data source + execution client so the venue
+        # handed to ``process_strategy`` actually carries the fill seam.
+        self._venue.data_source = self.data_handler
+        self._venue.execution_client = client
         return client
 
     def _simulate(self, df_signals: pd.DataFrame):
@@ -258,7 +288,7 @@ class Backtester(BaseBacktester):
             cfg.TICKERS = [self.ticker]
             for ts, _row in df_signals.iterrows():
                 ts = cast("pd.Timestamp", ts)
-                self.engine.process_strategy(self.strategy, ts, client)
+                self.engine.process_strategy(self.strategy, ts, self._venue)
         finally:
             if prev_tickers is None:
                 if hasattr(cfg, "TICKERS"):

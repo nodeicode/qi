@@ -49,7 +49,7 @@ from quant.live.utils import (
 )
 from quant.observability import Span, SpanName
 from quant.portfolio import Portfolio
-from quant.venue import AlpacaCalendar, AlpacaVenue
+from quant.venue import AlpacaCalendar, venue_by_name
 from quant.venue.live import FillReport, LiveExecutionClient
 
 # -----------------------------------------------------------------------------
@@ -209,11 +209,33 @@ class UnifiedTrader:
         self._load_local_state()
 
         # Live venue + execution client (spec `execution` Live orders through
-        # venue-bound clients): the venue is the broker-and-session unit, and the
-        # execution client is the single gated/submission-and-reconcile seam the
-        # shared engine loop dispatches to. The calendar wraps the first trading
-        # client; ``AlpacaVenue`` fails closed when the calendar can't answer.
-        self.venue = AlpacaVenue(
+        # venue-bound clients / Venue resolved from the strategy declaration):
+        # the venue is the broker-and-session unit, resolved by id from the
+        # strategies' declarations (default ``alpaca`` — the live venue) so an
+        # unknown/conflicting declared id fails loudly at construction. The
+        # calendar wraps the first trading client and the venue fails closed
+        # when the calendar can't answer. The execution client is the single
+        # gated/submission-and-reconcile seam the shared engine loop dispatches
+        # to, wired onto the venue once built.
+        # Only a concrete non-empty *string* declaration is a real venue id; a
+        # mock/absent attribute falls back to the shared live venue so tests
+        # with stub strategies still resolve ``alpaca``.
+        _declared_venues = {
+            v
+            for s in self.strategies
+            for v in [
+                getattr(s, "venue", "")
+                or getattr(getattr(s, "config", None), "venue", "")
+            ]
+            if isinstance(v, str) and v
+        }
+        if len(_declared_venues) > 1:
+            raise ValueError(
+                "live strategies declare conflicting venues: "
+                f"{sorted(_declared_venues)}"
+            )
+        self.venue = venue_by_name(
+            next(iter(_declared_venues), "alpaca"),
             data_source=self.data_handler,
             calendar=AlpacaCalendar(next(iter(self.clients.values()), None)),
         )
@@ -538,7 +560,11 @@ class UnifiedTrader:
             now = now.astimezone(datetime.UTC).replace(tzinfo=None)
         try:
             engine = self.engines[strategy.name]
-            engine.process_strategy(strategy, now, self.execution_client)
+            # Hand the resolved (wired) venue, not the bare execution client,
+            # to ``process_strategy``; the engine drives the venue's execution
+            # client as the fill seam (spec `execution` Venue resolved from the
+            # strategy declaration).
+            engine.process_strategy(strategy, now, self.venue)
         except Exception as e:
             self.logger.exception(
                 f"[{getattr(strategy, 'name', '?')}] Unhandled error in strategy runner: {e}"
