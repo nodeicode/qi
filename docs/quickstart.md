@@ -25,55 +25,82 @@ anything in this guide.
 
 > Reminder: the broker/AWS deps **are** present in this repo's own dev group so
 > `uv run test` can run the live/golden suites in CI. A clean `pip install
-> quant` elsewhere is truly brokerless — `quant-paper`, `quant-backtest`, and
-> `quant-portfolio` still work.
+> quant` elsewhere is truly brokerless — the library runs offline with synthetic
+> bars, and live is an optional extra you never import.
 
 ## 2. Backtest the reference strategy
 
-```bash
-uv run quant-backtest
-```
-
-You should see a one-line summary of a deterministic offline backtest
-(`example_equity` on `SPY`, synthetic bars):
-
-```text
-strategy:        example_equity
-ticker:          SPY
-period:          2024-01-02 -> 2024-06-28
-entries:         2
-final_equity:    123,314.24
-```
-
-Export the equity curve to a CSV if you want it:
+Q1 is a **library**: you drive the pipeline directly from a Python script or a
+notebook. A zero-key offline backtest on the reference `example_equity` strategy
+is a few lines — synthetic bars need no network and no API keys:
 
 ```bash
-uv run quant-backtest --out-csv equity.csv
+uv run python - <<'PY'
+from quant.backtest.backtester import Backtester
+from quant.data import SyntheticDataHandler
+from quant.strategies.example_equity.strategy import (
+    ExampleEquityConfig,
+    ExampleEquityStrategy,
+)
+
+cfg = ExampleEquityConfig(INTERVAL="1d", MANAGE_INTERVAL="1d")
+bt = Backtester(
+    cfg,
+    ExampleEquityStrategy(cfg),
+    "2024-01-02",
+    "2024-06-28",
+    "SPY",
+    data_handler=SyntheticDataHandler(),
+)
+trades = bt.run_backtest()
+bt.compute_equity_curve()
+print("entries:", len(trades))
+print("final_equity:", round(float(bt.equity_curve.iloc[-1]), 2))
+PY
 ```
 
-`--help` documents the rest (`--start`, `--end`, `--ticker`, `--verbose`).
+You get a deterministic result on any machine (synthetic bars, same inputs →
+same trades/metrics). Drop `data_handler=SyntheticDataHandler()` for a real venue
+and `Backtester` runs the same pipeline against live bars — only the executor
+changes (see `docs/deployment.md`).
 
 ## 3. Paper dry-run (zero-AWS dev mode)
 
+A keyless dev dry-run is just the runtime-config path: poll a local config file
+through `FileConfigSource` + `ConfigSync` and resolve the named strategy. No
+boto3, no Alpaca, no execution:
+
 ```bash
-uv run quant-paper --config paper_config.json --iterations 5
+uv run python - <<'PY'
+import json
+from pathlib import Path
+
+from quant.config import ConfigSync, FileConfigSource
+from quant.strategies import get_strategy
+from quant.strategies.example_equity.strategy import ExampleEquityConfig
+
+default_cfg = ExampleEquityConfig(INTERVAL="1d", MANAGE_INTERVAL="1d")
+
+path = Path("paper_config.json")
+if not path.exists():
+    path.write_text(json.dumps({"strategies": [{"name": "example_equity"}]}))
+
+sync = ConfigSync(FileConfigSource(path))
+for tick in range(3):
+    cfg = sync.poll()
+    if cfg is not None:
+        for entry in cfg.get("strategies", []):
+            strat = get_strategy(entry["name"])(default_cfg)
+            print(f"tick {tick}: {strat.name} ready (paper)")
+    else:
+        print(f"tick {tick}: config unchanged")
+print("paper dry-run complete; exiting cleanly")
+PY
 ```
 
-This starts a local, keyless "paper" runtime: it writes a default
-`paper_config.json` if none exists, then polls that file once per tick through
-the local `FileConfigSource` backend (no boto3 anywhere), resolves
-`example_equity`, and logs what it would do. It exits cleanly after the
-configured number of ticks:
-
-```text
-[quant-paper] paper runtime starting (backend=file, config=paper_config.json)
-[quant-paper] tick 0: config adopted (1 strategy(s))
-[quant-paper] tick 0: example_equity ready (paper)
-[quant-paper] tick 1: config unchanged
-[quant-paper] paper dry-run complete; exiting cleanly
-```
-
-Use `--no-sleep` to skip the inter-tick delay (CI/docs friendly).
+The full paper/live trader turns this poller into a run loop — see
+`docs/deployment.md` for the runnable `UnifiedTrader` snippet (a script or
+systemd unit).
 
 ## 4. Verify the full suite (optional)
 
@@ -92,7 +119,7 @@ environment. Expect ~830 tests, all green.
 
 ## Notes
 
-- **No AWS:** no IMDS, no boto3, no credentials — `quant-paper`, `quant-backtest`,
-  and `quant-portfolio` are fully offline and keyless.
+- **No AWS:** no IMDS, no boto3, no credentials — every offline path here is
+  fully keyless via synthetic bars.
 - **Deterministic:** synthetic bars mean the same invocation yields the same
   result on any machine.

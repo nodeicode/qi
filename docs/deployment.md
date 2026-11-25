@@ -7,26 +7,23 @@ credentials, never inline secrets.
 
 ## Tiers
 
-| Tier | Command | Needs | Notes |
+| Tier | How | Needs | Notes |
 |---|---|---|---|
-| Dev / paper dry-run | `uv run quant-paper` | none | offline, keyless; polls a local JSON config, exits cleanly |
-| Backtest (offline) | `uv run quant-backtest` | none | synthetic bars, deterministic |
-| Portfolio report | `uv run quant-portfolio` | none | snapshot or demo metrics |
-| Paper/live trader | `uv run quant-live --run` | `quant[alpaca]` + Alpaca creds | real venue fills |
-| Prod config backend | `QI_CONFIG_BACKEND=ssm quant-live --run` | `quant[ssm]` (boto3) + AWS | SSM Parameter Store |
+| Dev / paper dry-run | `FileConfigSource` + `ConfigSync` loop | none | offline, keyless; polls a local JSON config |
+| Backtest (offline) | `Backtester` + `SyntheticDataHandler` | none | synthetic bars, deterministic |
+| Portfolio report | `Portfolio.from_snapshot(...)` | none | snapshot or demo metrics |
+| Paper/live trader | `UnifiedTrader().run()` | `quant[alpaca]` + Alpaca creds | real venue fills |
+| Prod config backend | `QI_CONFIG_BACKEND=ssm` + trader run | `quant[ssm]` (boto3) + AWS | SSM Parameter Store |
 
 ## Paper is the default (zero-AWS dev mode)
 
-The development path never touches AWS or Alpaca:
-
-```bash
-uv run quant-paper --config paper_config.json --iterations 5
-```
+The development path never touches AWS or Alpaca. A dry-run is the runtime-config
+path driving the reference strategy — see `docs/quickstart.md` §3:
 
 - Uses the **file config backend** (`FileConfigSource` + `ConfigSync`), a
   single stat per poll — no boto3, no IMDS.
 - Resolves the named strategy (`example_equity`) through the registry.
-- Exits cleanly after the configured ticks; `--no-sleep` speeds CI runs.
+- Exits cleanly after the configured ticks.
 
 The config payload is a validated dict:
 
@@ -39,23 +36,26 @@ and the runtime keeps already-running strategies untouched.
 
 ## Paper/live with a real venue
 
+To run the trader, install the broker extra, export credentials, and invoke the
+`UnifiedTrader` from a script of your own (a cron/systemd unit just runs that
+script):
+
 ```bash
 uv sync --extra alpaca            # or: pip install 'quant[alpaca]'
 export APCA_API_KEY_ID=<...>      # paper or live key
 export APCA_API_SECRET_KEY=<...>
-uv run quant-live --run
+cat > run_trader.py <<'PY'
+from quant.live.trader import UnifiedTrader
+
+UnifiedTrader().run()      # resolves the config backend from the environment
+PY
+python run_trader.py
 ```
 
-`quant-live` fails fast with an actionable message if the extra or credentials
-are missing (never silently half-starts):
-
-```bash
-$ uv run quant-live --run
-quant-live requires Alpaca credentials; missing env var(s): APCA_API_KEY_ID, APCA_API_SECRET_KEY.
-```
-
-Point it at a paper/hardened Alpaca account for a true paper run; it persists a
-portfolio snapshot to `trader_state.json` and recovers it on restart.
+The trader fails fast with an actionable message if the extra or credentials
+are missing (never silently half-starts). Point it at a paper/hardened Alpaca
+account for a true paper run; it persists a portfolio snapshot to
+`trader_state.json` and recovers it on restart.
 
 ## Prod config: SSM Parameter Store (`quant[ssm]`)
 
@@ -69,8 +69,9 @@ uv sync --extra ssm               # or: pip install 'quant[ssm]'
 Select the backend explicitly and (optionally) pin the region:
 
 ```bash
-QI_CONFIG_BACKEND=ssm QI_AWS_REGION=us-east-1 uv run quant-live --run
+QI_CONFIG_BACKEND=ssm QI_AWS_REGION=us-east-1 python run_trader.py
 ```
+
 
 - **Backend**: `SSMConfigSource` (fetched lazily — importing the SDK never
   imports boto3).
@@ -103,7 +104,7 @@ QI_CONFIG_BACKEND=ssm QI_AWS_REGION=us-east-1 uv run quant-live --run
 
 ## Prod runbook sanity
 
-1. Base install green: `uv run test` + `uv run quant-backtest`.
-2. Paper dry-run green: `uv run quant-paper`.
-3. Paper (real venue) green: `uv run quant-live --run`.
+1. Base install green: `uv run test` (suite incl. the offline data/backtest/live paths).
+2. Paper dry-run green: the `FileConfigSource` + `ConfigSync` loop runs.
+3. Paper (real venue) green: `UnifiedTrader().run()` on a paper account.
 4. Then enable the SSM backend and point it at a hardened Alpaca account.

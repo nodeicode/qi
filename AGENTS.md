@@ -54,12 +54,10 @@ and `tasks.md` is the checklist — read both before working on the SDK shape.
 - `uv run ty check` — strict type checking (`quant/ty.toml`).
 - CI (`.github/workflows/ci.yml`) runs uv sync + ruff + the one suite on every
   push/PR to `main`.
-- SDK CLI (entry points under `[project.scripts]`):
-  - `uv run quant-backtest` — offline deterministic backtest (no keys).
-  - `uv run quant-paper` — zero-AWS dev dry-run, polls a local config file.
-  - `uv run quant-portfolio` — print portfolio metrics from a snapshot.
-  - `uv run quant-live` — precondition-checked live/paper trader launcher (`quant[alpaca]`).
-  See `docs/quickstart.md` and `docs/deployment.md`.
+- Q1 is a **library**, not a CLI — primitives and engine are imported directly
+  (offline backtest: `Backtester` + `quant.data.SyntheticDataHandler`; live: a
+  runnable `UnifiedTrader` snippet / script). See `docs/quickstart.md` and
+  `docs/deployment.md`.
 
 ## 4. Layout
 

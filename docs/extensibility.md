@@ -10,14 +10,18 @@ bars, no AWS). Each has been run against this tree.
 
 ## 0. Shared setup
 
-All recipes import the offline helpers:
+Recipes pull the offline bits straight from the library — synthetic bars from
+`quant.data` and the reference config built directly:
 
 ```python
-from quant.cli._common import make_equity_config, SyntheticDataHandler
+from quant.data import SyntheticDataHandler
+from quant.strategies.example_equity.strategy import ExampleEquityConfig
 ```
 
-- `make_equity_config()` → a runnable `example_equity` config on daily bars.
-- `SyntheticDataHandler()` → deterministic offline bars (a `DataSourceProtocol`).
+- `ExampleEquityConfig(INTERVAL="1d", MANAGE_INTERVAL="1d")` → a runnable
+  `example_equity` config on daily bars.
+- `SyntheticDataHandler(days=...)` → deterministic offline bars (implements
+  `get_historical_data`, so it plugs straight into a `Backtester`).
 
 ## 1. Add a strategy
 
@@ -27,7 +31,8 @@ A strategy is one class (protocol) + one registry line. Nothing else changes.
 uv run python - <<'PY'
 from quant.core.protocols import PositionDict
 from quant.backtest.backtester import Backtester
-from quant.cli._common import make_equity_config, SyntheticDataHandler
+from quant.data import SyntheticDataHandler
+from quant.strategies.example_equity.strategy import ExampleEquityConfig
 from quant.strategies import STRATEGY_REGISTRY
 
 class MyStrategy:
@@ -45,7 +50,7 @@ class MyStrategy:
 
 STRATEGY_REGISTRY["my_strategy"] = MyStrategy   # one registry line
 
-cfg = make_equity_config()
+cfg = ExampleEquityConfig(INTERVAL="1d", MANAGE_INTERVAL="1d")
 bt = Backtester(cfg, MyStrategy(cfg), "2024-01-02", "2024-03-29", "SPY",
                 data_handler=SyntheticDataHandler())
 trades = bt.run_backtest()
@@ -67,7 +72,7 @@ are adjusted + bar-driven.
 ```bash
 uv run python - <<'PY'
 from quant.venue.base import DataSourceProtocol
-from quant.cli._common import SyntheticDataHandler
+from quant.data import SyntheticDataHandler
 
 src = SyntheticDataHandler()
 assert isinstance(src, DataSourceProtocol)   # runtime-checkable
@@ -122,9 +127,10 @@ from quant.backtest.executors.router import ExecutorRouter, DEFAULT_REGISTRY
 from quant.backtest.executors.context import BacktestExecContext
 from quant.backtest.executors.equity import EquityExecutor
 from quant.core.engine import TradingEngine
-from quant.cli._common import make_equity_config, SyntheticDataHandler
+from quant.data import SyntheticDataHandler
+from quant.strategies.example_equity.strategy import ExampleEquityConfig
 
-cfg = make_equity_config()
+cfg = ExampleEquityConfig(INTERVAL="1d", MANAGE_INTERVAL="1d")
 class TrivialStrategy:
     name = "s"
     def __init__(self, c): self.config = c

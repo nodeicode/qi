@@ -22,20 +22,28 @@ uv sync                      # one distribution "quant"; pure-pandas, no system 
 uv run test                  # full suite (engine + data + backtest + live)
 ```
 
-Run an offline backtest with the reference equity strategy (no keys, no AWS):
+Q1 is a **library**: drive the pipeline from a script or a notebook. An offline
+backtest on the reference equity strategy (no keys, no AWS):
 
 ```bash
-uv run quant-backtest
+uv run python - <<'PY'
+from quant.backtest.backtester import Backtester
+from quant.data import SyntheticDataHandler
+from quant.strategies.example_equity.strategy import (
+    ExampleEquityConfig, ExampleEquityStrategy,
+)
+cfg = ExampleEquityConfig(INTERVAL="1d", MANAGE_INTERVAL="1d")
+bt = Backtester(cfg, ExampleEquityStrategy(cfg), "2024-01-02",
+                "2024-06-28", "SPY", data_handler=SyntheticDataHandler())
+trades = bt.run_backtest(); bt.compute_equity_curve()
+print("entries:", len(trades))
+PY
 ```
 
-Then a keyless paper dry-run that polls a local config file:
-
-```bash
-uv run quant-paper
-```
-
-See `docs/quickstart.md` for the full <5-minute clone→backtest→paper guide,
-and `docs/extensibility.md` to add your own strategy / data source / venue.
+A keyless dev dry-run polls a local config file via `FileConfigSource` + `ConfigSync`;
+live is a runnable `UnifiedTrader` snippet — see `docs/quickstart.md` (full
+<5-minute clone→backtest→paper guide) and `docs/deployment.md` (live/systemd).
+`docs/extensibility.md` covers adding your own strategy / data source / venue.
 
 `uv run test -m live` scopes the folded live layer; `-m data` / `-m backtest` the engine data/backtest tests.
 

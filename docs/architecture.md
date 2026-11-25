@@ -108,5 +108,5 @@ invariants and extension points.
 - `test_golden_example_equity.py` / `test_golden_regression.py` — frozen
   end-to-end output for the reference strategy / a synthetic strategy.
 - `test_import_layering.py` — the one-way dependency contract.
-- The CLI (`quant-backtest`, `quant-paper`) exercises the pipeline offline —
-  see `docs/quickstart.md`.
+- The library's offline path (`Backtester` + `SyntheticDataHandler`) exercises the
+  pipeline against synthetic bars — see `docs/quickstart.md`.
