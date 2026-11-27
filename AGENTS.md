@@ -139,7 +139,11 @@ alone, with no outside context required. Concretely:
   file in this tree.
 
 The goal: comment as if each line were read in isolation by someone who has
-never seen the plan or the surrounding project.
+never seen the plan or the surrounding project. Every comment must be
+understandable **end-to-end from its own words alone** — it must never
+reference plans, tickets, ports, or any other context a reader would have to
+go look up to understand; the meaning has to be fully carried by the comment
+itself.
 
 ## 8. Where to look next
 
