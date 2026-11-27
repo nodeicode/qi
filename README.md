@@ -1,4 +1,4 @@
-<p align="center"><strong>Qi</strong> — <em>Quantitative Intelligence</em> primitives to help you model, research, and deploy mathematical rules in open markets.</p>
+<p align="center"><strong>Qi</strong> — <em>Quantitative Intelligence</em> primitives to model, research, and deploy mathematical rules in open markets.</p>
 
 Qi is a lean, boring-Python SDK for quantitative research → backtest → paper → live, with a single decision pipeline shared byte-for-byte across environments so research results are truthful previews of live behavior *(research/live parity by construction, not by duplication)*.
 
