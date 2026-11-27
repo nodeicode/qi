@@ -193,12 +193,13 @@ class Backtester(BaseBacktester):
         for sub in subs:
             frame = self._fulfill(sub, preload_start, self.end_date)
             self._sub_frames.append((sub, frame))
-        cadence = subs[0].cadence if subs else "1h"
-        self._df_manage = self.data_handler.get_historical_data(
-            ticker=self.ticker,
-            start=preload_start,
-            end=self.end_date,
-            interval=cadence,
+        # Tradable-space manage frame is the signal subscription's own bars (the
+        # execution client prices raw fills from it). No subscription -> nothing
+        # to trade -> an empty manage frame.
+        self._df_manage = (
+            self.data_handler.get_data(subs[0], preload_start, self.end_date)
+            if subs
+            else pd.DataFrame()
         )
         if self._df_manage is not None and not self._df_manage.empty:
             self._df_manage = self._df_manage.sort_index()
@@ -207,17 +208,7 @@ class Backtester(BaseBacktester):
 
     def _fulfill(self, sub: Subscription, start: str, end: str) -> pd.DataFrame:
         """Fulfill one subscription over ``[start, end]`` on the injected handler."""
-        get_data = getattr(self.data_handler, "get_data", None)
-        if get_data is not None:
-            frame = get_data(sub, start, end)
-            if frame is not None and not frame.empty:
-                return frame.sort_index()
-        frame = self.data_handler.get_historical_data(
-            ticker=sub.instrument.symbol,
-            start=start,
-            end=end,
-            interval=sub.cadence,
-        )
+        frame = self.data_handler.get_data(sub, start, end)
         if frame is None:
             return pd.DataFrame()
         return frame.sort_index()

@@ -52,21 +52,8 @@ class ExampleEquityDataHandler:
 
     def get_data(self, subscription, start, end, use_cache=True, adjustment=None):
         del use_cache, adjustment
-        if subscription.key() != self._SUB.key():
-            return pd.DataFrame()
-        return self.get_historical_data(
-            ticker=TICKER, start=start, end=end, interval="1h"
-        )
-
-    def get_historical_data(
-        self,
-        ticker: str,
-        start,
-        end,
-        interval: str,
-        use_cache: bool = True,
-        adjustment: str | None = None,
-    ) -> pd.DataFrame:
+        # Serve any bars subscription from the loaded frame (the synthetic series
+        # has a single cadence; the MTM/benchmark reads reuse it for ``1d``).
         frame = load_example_equity_bars()
         s = pd.Timestamp(start)
         e = pd.Timestamp(end)

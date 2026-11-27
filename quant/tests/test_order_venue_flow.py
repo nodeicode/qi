@@ -64,9 +64,6 @@ class _FakeDataHandler:
     def get_data(self, *args, **kwargs):
         return None
 
-    def get_historical_data(self, *args, **kwargs):
-        return None
-
 
 def _engine() -> TradingEngine:
     return TradingEngine(OrderStrategy(), data_handler=_FakeDataHandler())

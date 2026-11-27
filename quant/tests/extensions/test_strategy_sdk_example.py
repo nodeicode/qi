@@ -124,18 +124,6 @@ class SynthDataHandler:
 
     def get_data(self, subscription, start, end, use_cache=True, adjustment=None):
         del subscription, use_cache, adjustment
-        return self.get_historical_data("SPY", start, end, "1d")
-
-    def get_historical_data(
-        self,
-        ticker: str,
-        start,
-        end,
-        interval: str,
-        use_cache: bool = True,
-        adjustment: str | None = None,
-    ) -> pd.DataFrame:
-        del ticker, interval, use_cache, adjustment
         s = pd.Timestamp(start)
         e = pd.Timestamp(end)
         return self._df.loc[(self._df.index >= s) & (self._df.index <= e)].copy()

@@ -61,20 +61,3 @@ class DataHandlerProtocol(Protocol):
         ignore it. Unsupported datatypes raise.
         """
         ...
-
-    def get_historical_data(
-        self,
-        ticker: str,
-        start,
-        end,
-        interval: str,
-        use_cache: bool = True,
-        adjustment: str | None = None,
-    ) -> pd.DataFrame:
-        """Fetch OHLCV bars for *ticker* over ``[start, end]``.
-
-        Convenience alias resolving to the same bars as :meth:`get_data` (the
-        backtester uses it for the raw manage frame; the engine consumes the
-        subscription surface directly).
-        """
-        ...

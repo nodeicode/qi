@@ -75,33 +75,6 @@ class BacktestDataHandler:
             )
         self._buffers[subscription.key()] = frame if frame.empty else frame.sort_index()
 
-    def get_historical_data(
-        self,
-        ticker: str,
-        start,
-        end,
-        interval: str,
-        use_cache: bool = True,
-        adjustment: str = "all",
-    ) -> pd.DataFrame:
-        """Return a window view of the pre-loaded DataFrame for *interval*.
-
-        Both *start* and *end* are honoured via ``searchsorted`` so the
-        returned slice matches the rolling lookback window computed by
-        ``fetch_data``.  No copy is made; ``df.iloc[left:right]`` is a
-        zero-allocation view.
-
-        For daily intervals, applies the same incomplete-bar trim as the
-        live ``fetch_data`` path so mid-session cutoffs cannot include
-        today's still-forming bar (D1/D2).
-
-        For intraday intervals, trims to ``closed_bar_asof(end, interval)``
-        so manage/signal fetches never include the bar still open at *end*
-        (``searchsorted(..., side="right")`` alone would).
-        """
-        df = self._frame_for_interval(interval)
-        return self._slice_window(df, start, end, interval)
-
     def get_data(
         self,
         subscription: Subscription,
@@ -117,6 +90,13 @@ class BacktestDataHandler:
         that frame and is served by index lookup (no re-parse per bar). A
         cadence that was not pre-loaded — or a window outside the loaded range —
         yields an empty stream rather than raising.
+
+        Both *start* and *end* are honoured via ``searchsorted`` so the sliced
+        window matches the rolling lookback window the engine requests.
+        Intraday cadences are trimmed to the last completed bar (a bar still
+        open at *end* is excluded); the daily cadence trims the still-forming
+        current bar, so a mid-session cutoff never includes a bar that has not
+        yet closed — the same closed-bar rule the live fetch path applies.
         """
         del use_cache, adjustment
         if subscription.datatype is not Datatype.BARS:

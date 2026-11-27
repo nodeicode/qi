@@ -9,6 +9,8 @@ from quant.backtest.utils import (
     calculate_metrics,
 )
 from quant.data._times import parse_naive_utc, to_naive_index, to_naive_utc
+from quant.data.subscription import Datatype, Subscription
+from quant.instruments import EquityInstrument
 from quant.utils.strategy_config import BaseStrategyConfig
 
 
@@ -67,6 +69,16 @@ class BaseBacktester:
             self.logger.addHandler(handler)
         self.logger.propagate = False
 
+    def _daily_subscription(self, ticker: str) -> Subscription:
+        """A daily equity bars subscription for *ticker* (metric/benchmark reads)."""
+        return Subscription(
+            instrument=EquityInstrument(
+                symbol=ticker, venue=getattr(self, "venue", "backtest")
+            ),
+            datatype=Datatype.BARS,
+            cadence="1d",
+        )
+
     def compute_equity_curve(self):
         """
         Computes the daily equity curve including unrealized PnL (Mark-to-Market).
@@ -77,13 +89,12 @@ class BaseBacktester:
             )
             return
 
-        # 1. Fetch Daily Data for MTM Calculation
+        # 1. Fetch Daily Data for MTM Calculation (typed single data surface)
         try:
-            df_daily = self.data_handler.get_historical_data(
-                ticker=self.ticker,
-                start=self.start_date,
-                end=self.end_date,
-                interval="1d",
+            df_daily = self.data_handler.get_data(
+                self._daily_subscription(self.ticker),
+                self.start_date,
+                self.end_date,
             )
         except Exception as e:
             self.logger.error(f"Failed to fetch daily data for equity curve: {e}")
@@ -225,9 +236,11 @@ class BaseBacktester:
         # 2. Benchmark Returns (Default to self.ticker)
         target_benchmark = benchmark_ticker if benchmark_ticker else self.ticker
 
-        # Fetch Benchmark Data (1d)
-        bench_df = self.data_handler.get_historical_data(
-            target_benchmark, self.start_date, self.end_date, "1d"
+        # Fetch Benchmark Data (1d) through the typed single data surface.
+        bench_df = self.data_handler.get_data(
+            self._daily_subscription(target_benchmark),
+            self.start_date,
+            self.end_date,
         )
 
         if not bench_df.empty:

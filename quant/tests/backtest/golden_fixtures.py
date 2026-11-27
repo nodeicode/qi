@@ -62,20 +62,6 @@ class FakeDataHandler:
         e = pd.Timestamp(end)
         return self._df.loc[(self._df.index >= s) & (self._df.index <= e)].copy()
 
-    def get_historical_data(
-        self,
-        ticker: str,
-        start,
-        end,
-        interval: str,
-        use_cache: bool = True,
-        adjustment: str | None = None,
-    ) -> pd.DataFrame:
-        del ticker, interval
-        return self.get_data(
-            None, start, end, use_cache=use_cache, adjustment=adjustment
-        )
-
 
 class GoldenEquityStrategy(Strategy):
     """Deterministic declarative equity strategy: BUY every N-th bar, max-hold exit."""

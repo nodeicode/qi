@@ -36,20 +36,6 @@ class SyntheticDataHandler:
             index=idx,
         )
 
-    def get_historical_data(
-        self,
-        ticker: str,
-        start,
-        end,
-        interval: str,
-        use_cache: bool = True,
-        adjustment: str | None = None,
-    ) -> pd.DataFrame:
-        del ticker, interval, use_cache, adjustment  # synthetic ignores these
-        s = pd.Timestamp(start)
-        e = pd.Timestamp(end)
-        return self._df.loc[(self._df.index >= s) & (self._df.index <= e)].copy()
-
     def get_data(
         self,
         subscription: Subscription,

@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 import pandas as pd
 
 if TYPE_CHECKING:
+    from quant.data.subscription import Subscription
     from quant.order import Order
     from quant.portfolio.base import Fill
 
@@ -30,14 +31,19 @@ FALLBACK_FORCE_CLOSE_BEFORE_MINUTES = 15
 
 @runtime_checkable
 class DataSourceProtocol(Protocol):
-    """Market-data source the engine reads bars through (Duck-typed)."""
+    """Market-data source the engine reads data through (Duck-typed).
 
-    def get_historical_data(
+    One canonical typed surface — :meth:`get_data(subscription, ...)` — so a
+    venue's data source and a strategy's data handler satisfy the same shape
+    (parity at the type level) and an extender implements a single method
+    rather than guessing between a typed and a ticker-based spelling.
+    """
+
+    def get_data(
         self,
-        ticker: str,
+        subscription: Subscription,
         start,
         end,
-        interval: str,
         use_cache: bool = True,
         adjustment: str | None = None,
     ) -> pd.DataFrame: ...
