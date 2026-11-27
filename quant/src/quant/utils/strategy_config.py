@@ -61,6 +61,13 @@ class BaseStrategyConfig:
     # delayed SIP parity (e.g. example_equity) override explicitly.
     DATA_DELAY: int = 0
 
+    # Rolling lookback (calendar days) the engine serves the author body per
+    # tick (the served window behind ``events.bars()``). Defaults to 120;
+    # a strategy whose trailing indicators/percentiles need a longer history raises
+    # this explicitly — the strategy's pre-load tail must cover the requested
+    # window or the earliest ticks are served thin.
+    BARS_LOOKBACK_DAYS: int = 120
+
     # --- Declarative declarations (spec `strategy-sdk`) ---
     #: Typed instruments the strategy trades (contract facts live on each).
     instruments: list = field(default_factory=list)
@@ -103,6 +110,10 @@ class BaseStrategyConfig:
         _require(self.BASE_SLIPPAGE_FACTOR >= 0, "BASE_SLIPPAGE_FACTOR must be >= 0")
 
         _require(self.DATA_DELAY >= 0, "DATA_DELAY must be >= 0")
+        _require(
+            self.BARS_LOOKBACK_DAYS >= 1,
+            "BARS_LOOKBACK_DAYS must be >= 1",
+        )
 
         _require(
             isinstance(self.instruments, list),

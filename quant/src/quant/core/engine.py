@@ -149,8 +149,6 @@ class TradingEngine:
 
     #: Max per-subscription buffers kept (bounded map keyed by subscription).
     _BUFFER_MAXLEN: int = 64
-    #: Rolling lookback (calendar days) served to the author body per tick.
-    _LOOKBACK_DAYS: int = 120
 
     def __init__(
         self,
@@ -167,6 +165,12 @@ class TradingEngine:
                 "BaseStrategyConfig instance"
             )
         self.strategy = strategy
+        # Author-body lookback (calendar days) served per tick. The strategy
+        # config owns the knob (``BARS_LOOKBACK_DAYS``, default 120); the
+        # engine holds no duplicate default — a strategy that needs a longer
+        # trailing window raises it on its config and the served window
+        # follows. The pre-load/live data tail must cover the requested span.
+        self._lookback_days: int = int(config.BARS_LOOKBACK_DAYS)
         # Data handler fulfilling ``get_data(subscription, ...)`` (live
         # AlpacaDataHandler, or the seeded BacktestDataHandler in backtest).
         self.data_handler = data_handler
@@ -227,7 +231,7 @@ class TradingEngine:
         end = pd.Timestamp(now)
         warmed = False
         for sub in self._resolve_subscriptions():
-            start = end - pd.Timedelta(days=self._LOOKBACK_DAYS)
+            start = end - pd.Timedelta(days=self._lookback_days)
             try:
                 window = get_data(sub, start, end)
             except Exception as e:  # warm is best-effort
@@ -253,7 +257,7 @@ class TradingEngine:
         return an empty frame without raising.
         """
         end = closed_bar_asof(now, sub.cadence)
-        start = end - pd.Timedelta(days=self._LOOKBACK_DAYS)
+        start = end - pd.Timedelta(days=self._lookback_days)
         source = getattr(venue, "data_source", None) or self.data_handler
         get_data = getattr(source, "get_data", None)
         if get_data is None:

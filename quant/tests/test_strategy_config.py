@@ -113,6 +113,7 @@ def test_canonical_reference_config_resolves() -> None:
         {"MIN_SIGNAL_CONFIDENCE": 1.1},
         {"BASE_SLIPPAGE_FACTOR": -0.01},
         {"DATA_DELAY": -1},
+        {"BARS_LOOKBACK_DAYS": 0},
         {"instruments": "not-a-list"},
         {"subscriptions": "not-a-list"},
         {"venue": 123},
